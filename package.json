@@ -6,7 +6,8 @@
     "@types/bun": "latest"
   },
   "scripts": {
-    "build": "tsx index"
+    "build": "tsx index",
+    "test": "bun test"
   },
   "peerDependencies": {
     "typescript": "^5",
