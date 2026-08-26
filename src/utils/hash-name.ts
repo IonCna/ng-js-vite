@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 
-export function createHashedName(name: string, content: string | Buffer) {
+export function createHashedName(name: string, content: string | Buffer | Buffer<ArrayBufferLike>) {
     const hash = createHash("sha256")
     const hashStr = hash.update(content).digest("hex").slice(0, 8)
 

@@ -1,16 +1,36 @@
 {
   "name": "ng-js-vite",
   "version": "0.1.0",
-  "module": "index.ts",
+  "description": "Vite plugin that resolves AngularJS-style templateUrl references and emits content-hashed template assets.",
   "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "license": "MIT",
   "author": "Max Flores",
+  "keywords": [
+    "vite",
+    "vite-plugin",
+    "angularjs",
+    "templateUrl"
+  ],
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "tsup": "^8.5.1"
   },
   "scripts": {
-    "build": "tsx index",
-    "test": "bun test"
+    "build": "tsup",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
   },
   "peerDependencies": {
     "typescript": "^5",

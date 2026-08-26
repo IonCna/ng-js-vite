@@ -56,11 +56,14 @@ export default defineConfig({
 ngJsTemplateParser({ hashed: false })
 ```
 
+Either way, `templateUrl` is rewritten to a `templates/...` path relative to the site root, so make sure your app has `<base href="/">` set (the standard AngularJS convention) — otherwise the browser resolves that relative URL against the current route instead of the root.
+
 ## Development
 
 ```bash
 bun install
-bun test    # run the unit tests for src/utils
+bun test     # run the unit tests for src/utils
+bun run build  # bundle index.ts into dist/ (JS + .d.ts) via tsup
 ```
 
 The core logic lives in `index.ts`; the supporting pieces (file filtering, `templateUrl` extraction, path resolution, hashing) are in `src/utils/`, each with its own test file.

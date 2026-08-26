@@ -4,6 +4,7 @@ import { obtainTemplateUrl } from "./src/utils/obtain-template-url.ts";
 import { createHashedName } from "./src/utils/hash-name.ts";
 import path from "node:path";
 import { readFileSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 import { resolveTemplatePath } from "./src/utils/resolve-template-path.ts";
 
 type NgJsTemplateParserOptions = {
@@ -13,7 +14,8 @@ type NgJsTemplateParserOptions = {
 type NgJsTemplateObject = {
     defaultName: string,
     hashedName: string,
-    dir: string
+    dir: string,
+    sourceId: string,
 }
 
 const DEFAULT_OPTIONS: NgJsTemplateParserOptions = {
@@ -32,7 +34,7 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
     return {
         name: 'ngJsTemplateParser',
 
-        transform(code, id) {
+        async transform(code, id) {
             if (!isValidFiles(id)) return
 
             const templateObj = obtainTemplateUrl(code)
@@ -46,7 +48,14 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                 templateUrl
             )
 
-            const source = readFileSync(resolvedPath)
+            let source: Buffer
+            try {
+                source = await readFile(resolvedPath)
+            } catch (error) {
+                this.error(
+                    `ngJsTemplateParser: could not read template "${templateUrl}" (resolved to "${resolvedPath}") referenced from "${id}": ${(error as Error).message}`
+                )
+            }
 
             const defaultName = path.basename(resolvedPath)
 
@@ -59,27 +68,35 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                 defaultName,
                 hashedName: hashed.value,
                 dir: path.dirname(resolvedPath),
+                sourceId: id,
             })
 
-            if (!options.hashed) return
+            const outputName = options.hashed ? hashed.value : defaultName
 
             return {
                 code: code.replace(
                     templateUrl,
-                    `templates/${hashed.value}`
+                    `templates/${outputName}`
                 ),
                 map: null,
             }
         },
 
-        generateBundle() {
+        async generateBundle() {
             for (const template of templates.values()) {
                 const sourcePath = path.join(
                     template.dir,
                     template.defaultName
                 )
 
-                const source = readFileSync(sourcePath)
+                let source: Buffer
+                try {
+                    source = await readFile(sourcePath)
+                } catch (error) {
+                    this.error(
+                        `ngJsTemplateParser: could not read template "${sourcePath}" referenced from "${template.sourceId}": ${(error as Error).message}`
+                    )
+                }
 
                 let fileName = options.hashed ? template.hashedName : template.defaultName
                 fileName = fileName.replace(/^\/+/, "")
@@ -99,7 +116,7 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
 
                 const fileName = path.basename(url)
                 const template = [...templates.values()].find(
-                    template => template.hashedName === fileName
+                    template => (options.hashed ? template.hashedName : template.defaultName) === fileName
                 )
 
                 if (!template) return next();
