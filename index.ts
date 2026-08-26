@@ -29,10 +29,15 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
         ...params
     }
 
+    let base = "/"
     const root = process.cwd()
 
     return {
         name: 'ngJsTemplateParser',
+
+        configResolved(config) {
+            base = config.base.endsWith("/") ? config.base : `${config.base}/`;
+        },
 
         async transform(code, id) {
             if (!isValidFiles(id)) return
@@ -48,7 +53,7 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                 templateUrl
             )
 
-            let source: Buffer
+            let source!: Buffer
             try {
                 source = await readFile(resolvedPath)
             } catch (error) {
@@ -72,12 +77,10 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
             })
 
             const outputName = options.hashed ? hashed.value : defaultName
+            const publicUrl = `${base}templates/${outputName}`;
 
             return {
-                code: code.replace(
-                    templateUrl,
-                    `templates/${outputName}`
-                ),
+                code: code.replace(templateUrl, publicUrl),
                 map: null,
             }
         },
@@ -89,7 +92,7 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                     template.defaultName
                 )
 
-                let source: Buffer
+                let source!: Buffer
                 try {
                     source = await readFile(sourcePath)
                 } catch (error) {
