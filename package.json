@@ -1,7 +1,10 @@
 {
   "name": "ng-js-vite",
+  "version": "0.1.0",
   "module": "index.ts",
   "type": "module",
+  "license": "MIT",
+  "author": "Max Flores",
   "devDependencies": {
     "@types/bun": "latest"
   },
