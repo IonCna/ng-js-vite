@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { ngJsTemplateParser } from "./index.ts"
@@ -36,5 +36,32 @@ describe("ngJsTemplateParser transform", () => {
         const result = await (plugin.transform as any).call({}, "const x = 1", componentPath)
 
         expect(result).toBeUndefined()
+    })
+})
+
+describe("ngJsTemplateParser generateBundle", () => {
+    test("hashed:false warns and skips when two templates collide on the same output name", async () => {
+        mkdirSync(path.join(dir, "a"))
+        mkdirSync(path.join(dir, "b"))
+        writeFileSync(path.join(dir, "a", "app-root.html"), "<div>a</div>")
+        writeFileSync(path.join(dir, "b", "app-root.html"), "<div>b</div>")
+
+        const plugin = ngJsTemplateParser({ hashed: false })
+        const warnings: string[] = []
+        const emits: any[] = []
+        const ctx = {
+            error: (m: string) => { throw new Error(m) },
+            warn: (m: string) => warnings.push(m),
+            emitFile: (f: any) => emits.push(f),
+        }
+
+        await (plugin.transform as any).call(ctx, code, path.join(dir, "a", "x.component.ts"))
+        await (plugin.transform as any).call(ctx, code, path.join(dir, "b", "y.component.ts"))
+        await (plugin.generateBundle as any).call(ctx)
+
+        expect(emits).toHaveLength(1)
+        expect(emits[0].fileName).toBe(path.join("templates", "app-root.html"))
+        expect(warnings).toHaveLength(1)
+        expect(warnings[0]).toContain("two templates resolve to")
     })
 })

@@ -33,7 +33,7 @@
     "prepublishOnly": "bun run build"
   },
   "peerDependencies": {
-    "typescript": "^7.0.2",
+    "typescript": "^5",
     "vite": "^8.2.2"
   }
 }

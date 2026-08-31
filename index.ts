@@ -86,7 +86,23 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
         },
 
         async generateBundle() {
+            const emitted = new Set<string>()
+
             for (const template of templates.values()) {
+                let fileName = options.hashed ? template.hashedName : template.defaultName
+                fileName = fileName.replace(/^\/+/, "")
+
+                const outputPath = path.join("templates", fileName)
+
+                if (emitted.has(outputPath)) {
+                    this.warn(
+                        `ngJsTemplateParser: two templates resolve to "${outputPath}" — skipping the one referenced from "${template.sourceId}". ` +
+                        `Hashed filenames are unique by design; with "hashed: false" templates that share a basename collide. ` +
+                        `Rename one of them or enable hashing.`
+                    )
+                    continue
+                }
+
                 const sourcePath = path.join(
                     template.dir,
                     template.defaultName
@@ -101,12 +117,11 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                     )
                 }
 
-                let fileName = options.hashed ? template.hashedName : template.defaultName
-                fileName = fileName.replace(/^\/+/, "")
+                emitted.add(outputPath)
 
                 this.emitFile({
                     type: "asset",
-                    fileName: path.join("templates", fileName),
+                    fileName: outputPath,
                     source
                 })
             }

@@ -9,7 +9,7 @@
         "tsup": "^8.5.1",
       },
       "peerDependencies": {
-        "typescript": "^7.0.2",
+        "typescript": "^5",
         "vite": "^8.2.2",
       },
     },
