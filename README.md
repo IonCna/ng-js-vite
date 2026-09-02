@@ -1,38 +1,52 @@
 # ng-js-vite
 
-A Vite plugin that resolves AngularJS-style `templateUrl` references in `.ts`/`.js` source files and emits the referenced HTML templates as content-hashed assets.
+Vite plugin for AngularJS apps that keeps external component templates working after build.
 
-## What it does
+It finds a component `templateUrl`, copies that HTML template into the final build, gives it a content hash, and rewrites the URL so AngularJS can load it in production.
 
-If a source file contains something like:
+If the same component also has a `styleUrl`, the CSS is inlined into the emitted template:
 
-```ts
-angular.module("app").component("appRoot", {
-  templateUrl: "./app-root.html",
-  controller: AppRootController,
-})
+```html
+<style data-ng-js-vite>
+/* component css */
+</style>
+
+<!-- component html -->
 ```
 
-(the same applies to `.directive()` definitions or `$routeProvider`/`ui-router` state configs — anywhere a `templateUrl: '...'` string literal shows up)
+## Example
 
-the plugin will:
+```js
+import angular from "angular"
 
-1. Find the `templateUrl` string during Vite's `transform` step.
-2. Resolve it to a real file path — relative (`./`, `../`), root-absolute (`/...`), `src/`-prefixed, or a bare filename next to the source file.
-3. Hash the template's contents (`sha256`, first 8 hex chars) and rewrite the `templateUrl` in the compiled output to point at `templates/<name>-<hash>.html`.
-4. On build, emit the template as a real asset under `templates/` in the output bundle.
-5. In dev (`vite dev`), serve the original template content whenever it's requested by its hashed name, so the rewritten URL resolves without needing a build.
+const appRootComponent = {
+  templateUrl: "./app-root.html",
+  styleUrl: "./app-root.css",
+  controller: AppRootController,
+}
 
-This keeps templates content-addressed and cacheable in production while staying transparent in dev.
+angular.module("app").component("appRoot", appRootComponent)
+```
+
+`styleUrl` is a plugin-only property. AngularJS does not load it by itself; `ng-js-vite` reads it at build time, inlines the CSS into the emitted template, and removes the original `styleUrl` from the compiled component.
+
+With the default config, the template is emitted as something like:
+
+```txt
+templates/app-root-a1b2c3d4.html
+```
+
+And the compiled component points AngularJS to that generated file.
 
 ## Install
 
 ```bash
 bun add ng-js-vite
-# or: npm install ng-js-vite
+# or
+npm install ng-js-vite
 ```
 
-Requires `vite@^8` and `typescript@^5` as peer dependencies.
+Requires `vite@^8` and `typescript@^5`.
 
 ## Usage
 
@@ -46,28 +60,76 @@ export default defineConfig({
 })
 ```
 
+## File Scope
+
+For now, this plugin supports **one `templateUrl` per source file**.
+
+If a `styleUrl` exists in that same file, it is paired with that template and inlined into it.
+
+Recommended component shape:
+
+```txt
+app-root.component.js
+app-root.component.html
+app-root.component.css
+```
+
+The same pattern works with TypeScript. Avoid putting multiple components with different `templateUrl` values in the same `.js` or `.ts` file. Split them into separate files instead.
+
+## TypeScript
+
+`styleUrl` is not part of AngularJS' built-in `IComponentOptions` type, so TypeScript will complain if you add it to a typed component definition.
+
+Add a project-level `.d.ts` file:
+
+```ts
+import "angular"
+
+declare module "angular" {
+  interface IComponentOptions {
+    styleUrl?: string
+  }
+}
+```
+
+Make sure that `.d.ts` file is included by your `tsconfig.json`. After that, `styleUrl` can be used directly in AngularJS component options:
+
+```ts
+import type { IComponentOptions } from "angular"
+
+export const appRootComponent: IComponentOptions = {
+  templateUrl: "./app-root.html",
+  styleUrl: "./app-root.css",
+  controller: AppRootController,
+}
+```
+
 ## Options
 
-| Option   | Type      | Default | Description                                                                                   |
-| -------- | --------- | ------- | ----------------------------------------------------------------------------------------------- |
-| `hashed` | `boolean` | `true`  | When `true`, template filenames are content-hashed and `templateUrl` is rewritten to match. When `false`, templates are emitted under their original filename and `templateUrl` is left untouched. |
+| Option   | Type      | Default | Description |
+| -------- | --------- | ------- | ----------- |
+| `hashed` | `boolean` | `true`  | Adds a content hash to emitted template filenames. |
 
 ```ts
 ngJsTemplateParser({ hashed: false })
 ```
 
-Either way, `templateUrl` is rewritten to a `templates/...` path relative to the site root, so make sure your app has `<base href="/">` set (the standard AngularJS convention) — otherwise the browser resolves that relative URL against the current route instead of the root.
+When `hashed` is disabled, templates are emitted with their original filename:
 
-## Development
-
-```bash
-bun install
-bun test     # run the unit tests for src/utils
-bun run build  # bundle index.ts into dist/ (JS + .d.ts) via tsup
+```txt
+templates/app-root.html
 ```
 
-The core logic lives in `index.ts`; the supporting pieces (file filtering, `templateUrl` extraction, path resolution, hashing) are in `src/utils/`, each with its own test file.
+## Base Path
 
-## License
+Generated template URLs respect Vite's `base` option.
 
-MIT © Max Flores — see [LICENSE](./LICENSE).
+If your app uses routes, keep a base tag in `index.html` so AngularJS resolves template URLs from the app root:
+
+```html
+<base href="/">
+```
+
+## Roadmap
+
+Future versions are expected to support runtime CSS isolation, so each `templateUrl` can keep its inlined `styleUrl` styles scoped to that component template.
