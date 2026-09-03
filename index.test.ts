@@ -58,13 +58,12 @@ describe("ngJsTemplateParser transform", () => {
         expect(result?.code).toBe(code.replace("./app-root.html", "/templates/app-root.html"))
     })
 
-    test("inlines styleUrl into the emitted template and removes styleUrl from code", async () => {
+    test("inlines styleUrl into the emitted template and leaves the code's styleUrl untouched", async () => {
         const plugin = ngJsTemplateParser()
         const result = await callTransform(plugin, {}, codeWithStyle, componentPath)
 
         expect(result?.code).toMatch(/templateUrl: "\/?templates\/app-root-[0-9a-f]{8}\.html"/)
-        expect(result?.code).not.toContain(`styleUrl: "./app-root.css"`)
-        expect(result?.code).toContain("ngJsViteInlineStyle: true")
+        expect(result?.code).toContain(`styleUrl: "./app-root.css"`)
     })
 
     test("leaves code untouched when there is no templateUrl or styleUrl", async () => {
@@ -163,8 +162,8 @@ describe("ngJsTemplateParser generateBundle", () => {
 
         expect(emit?.fileName).toMatch(/templates[\\/]app-root-[0-9a-f]{8}\.html/)
         expect(source).toContain("<style data-ng-js-vite>")
-        expect(source).toContain(".title { color: red; }")
-        expect(source).toContain("<div>hello</div>")
+        expect(source).toMatch(/\.title\[_content-[0-9a-f]{8}]\{color:red}/)
+        expect(source).toMatch(/<div _content-[0-9a-f]{8}="">hello<\/div>/)
     })
 
     test("keeps distinct template names when their content is identical", async () => {
@@ -218,8 +217,8 @@ describe("ngJsTemplateParser development server", () => {
 
         expect(response.statusCode).toBe(200)
         expect(headers.get("Content-Type")).toBe("text/html; charset=utf-8")
-        expect(body?.toString()).toContain(".title { color: blue; }")
-        expect(body?.toString()).toContain("<div>fresh</div>")
+        expect(body?.toString()).toMatch(/\.title\[_content-[0-9a-f]{8}]\{color:blue}/)
+        expect(body?.toString()).toMatch(/<div _content-[0-9a-f]{8}="">fresh<\/div>/)
         expect(forwarded).toBeTrue()
 
         writeFileSync(templatePath, "<div>hello</div>")

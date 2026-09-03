@@ -39,20 +39,15 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
             const reader = CodeReader.from(code)
             const fileReader = FileReader.parse(reader, id)
 
-            const content = await fileReader.read()
-            const source = TemplatePatcher.from({
-                ...content,
-                scope: TemplatePatcher.scope(fileReader.templatePath),
-            })
+            const source = await TemplatePatcher.from(fileReader)
 
-            const hashed = reader.hash(source.toString("utf-8"))
+            const hashed = reader.hash(source.buffer.toString("utf-8"))
 
             templates.set(fileReader.templatePath, { reader, fileReader, hashed })
 
             const transformedCode = CodePatcher.from({
                 code,
                 hashed: options.hashed,
-                styleIsolate: true,
             }, reader, fileReader, hashed)
 
             return {
@@ -82,20 +77,14 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                     continue
                 }
 
-                const { template: templateBuffer, style: styleBuffer } = await template.fileReader.read()
-
-                const source = TemplatePatcher.from({
-                    template: templateBuffer,
-                    scope: TemplatePatcher.scope(template.fileReader.templatePath),
-                    style: styleBuffer
-                })
+                const source = await TemplatePatcher.from(template.fileReader)
 
                 emitted.add(outputPath)
 
                 this.emitFile({
                     type: "asset",
                     fileName: outputPath,
-                    source
+                    source: source.buffer
                 })
             }
         },
@@ -118,13 +107,7 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                 if (!template) return next();
 
                 try {
-                    const { template: templateBuffer, style: styleBuffer } = await template.fileReader.read({ preventCache: true })
-
-                    const source = TemplatePatcher.from({
-                        template: templateBuffer,
-                        scope: TemplatePatcher.scope(template.fileReader.templatePath),
-                        style: styleBuffer
-                    })
+                    const source = await TemplatePatcher.from(template.fileReader, { preventCache: true })
 
                     res.statusCode = 200
                     res.setHeader(
@@ -132,7 +115,7 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                         "text/html; charset=utf-8"
                     )
 
-                    res.end(source)
+                    res.end(source.buffer)
                 } catch (error) {
                     next(error)
                 }

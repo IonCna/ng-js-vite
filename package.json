@@ -30,6 +30,7 @@
   ],
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/css-tree": "^3.2.0",
     "tsup": "^8.5.1"
   },
   "scripts": {
@@ -38,7 +39,11 @@
     "prepublishOnly": "bun run build"
   },
   "peerDependencies": {
-    "typescript": "^5",
-    "vite": "^8.2.2"
+    "typescript": ">=5.0.0",
+    "vite": ">=2.0.0"
+  },
+  "dependencies": {
+    "css-tree": "^3.2.1",
+    "parse5": "^8.0.1"
   }
 }

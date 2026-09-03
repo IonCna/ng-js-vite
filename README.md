@@ -4,14 +4,16 @@ Vite plugin for AngularJS apps that keeps external component templates working a
 
 It finds a component `templateUrl`, copies that HTML template into the final build, gives it a content hash, and rewrites the URL so AngularJS can load it in production.
 
-If the same component also has a `styleUrl`, the CSS is inlined into the emitted template:
+If the same component also has a `styleUrl`, the CSS is inlined into the emitted template and scoped to it, the same way Angular's emulated view encapsulation works: every element in the template and every selector in the style block get a unique attribute, so styles never leak into other components.
 
 ```html
 <style data-ng-js-vite>
-/* component css */
+.title[_content-a1b2c3d4] { color: red; }
 </style>
 
-<!-- component html -->
+<div _content-a1b2c3d4>
+  <!-- component html -->
+</div>
 ```
 
 ## Example
@@ -28,7 +30,7 @@ const appRootComponent = {
 angular.module("app").component("appRoot", appRootComponent)
 ```
 
-`styleUrl` is a plugin-only property. AngularJS does not load it by itself; `ng-js-vite` reads it at build time, inlines the CSS into the emitted template, and removes the original `styleUrl` from the compiled component.
+`styleUrl` is a plugin-only property. AngularJS does not load it by itself; `ng-js-vite` reads it at build time and inlines the scoped CSS into the emitted template. The original `styleUrl` declaration is left untouched in the compiled component — AngularJS ignores unknown component options, so it's harmless.
 
 With the default config, the template is emitted as something like:
 
@@ -46,7 +48,7 @@ bun add ng-js-vite
 npm install ng-js-vite
 ```
 
-Requires `vite@^8` and `typescript@^5`.
+Requires `vite>=2` and `typescript>=5`.
 
 ## Usage
 
@@ -130,6 +132,23 @@ If your app uses routes, keep a base tag in `index.html` so AngularJS resolves t
 <base href="/">
 ```
 
-## Roadmap
+## Changelog
 
-Future versions are expected to support runtime CSS isolation, so each `templateUrl` can keep its inlined `styleUrl` styles scoped to that component template.
+### CSS isolation (view encapsulation)
+
+Component styles declared via `styleUrl` are now scoped to their own template, the same way Angular's emulated view encapsulation works: a component's styles never leak out, and other components' styles never leak into it.
+
+Known limitations:
+
+- There's no equivalent of Angular's `:host` — the plugin never sees the element that renders the component (that's written in a parent template it doesn't process), so you can't style the host itself, only what's inside the template.
+- `:root` selectors (e.g. custom properties) inside a component's `styleUrl` won't work as expected, since `:root` is never part of what gets scoped.
+- `@keyframes` are left completely global on purpose, since a scoped keyframe name would no longer match the `animation-name` that references it.
+
+### Wider peer dependency ranges
+
+- `vite`: `>=2.0.0` (previously pinned to `^8.2.2`)
+- `typescript`: `>=5.0.0` (previously `^5`, which capped out below `6`)
+
+### `styleUrl` is no longer rewritten in compiled code
+
+Previously the plugin replaced `styleUrl: "..."` in the compiled component with `ngJsViteInlineStyle: true`. Since AngularJS ignores unknown component options, and the CSS is now inlined and scoped at the template level regardless, that rewrite was unnecessary and has been removed — `styleUrl` is left untouched in your compiled code.

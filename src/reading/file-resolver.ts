@@ -2,7 +2,7 @@ import {CodeReader} from "@ng-js-vite/reading/code-reader.ts";
 import path from "node:path";
 import {readFile} from "node:fs/promises";
 
-type FileReaderReadOptions = {
+export type FileReaderReadOptions = {
     preventCache?: boolean
 }
 
