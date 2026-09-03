@@ -1,6 +1,6 @@
 {
   "name": "ng-js-vite",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Vite plugin that emits content-hashed AngularJS templates and inlines styleUrl CSS.",
   "type": "module",
   "main": "./dist/index.js",
