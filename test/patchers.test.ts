@@ -56,18 +56,18 @@ describe("TemplatePatcher", () => {
 
         const patched = await patch("./plain.html")
 
-        expect(patched.buffer.toString()).toBe(`<main ${patched.scope}="">plain</main>`)
+        expect(patched.template.toString()).toBe(`<main ${patched.scope}="">plain</main>`)
+        expect(patched.style).toBeUndefined()
     })
 
-    test("wraps scoped style content around the scoped template", async () => {
+    test("scopes the template and the style as separate buffers", async () => {
         writeFileSync(path.join(dir, "styled.html"), "<main>styled</main>")
         writeFileSync(path.join(dir, "styled.css"), "main { color: red; }")
 
         const patched = await patch("./styled.html", "./styled.css")
 
-        expect(patched.buffer.toString()).toBe(
-            `<style data-ng-js-vite>\nmain[${patched.scope}]{color:red}\n</style>\n<main ${patched.scope}="">styled</main>`
-        )
+        expect(patched.template.toString()).toBe(`<main ${patched.scope}="">styled</main>`)
+        expect(patched.style?.toString()).toBe(`main[${patched.scope}]{color:red}`)
     })
 
     test("places the scope attribute before a pseudo-element", async () => {
@@ -76,7 +76,7 @@ describe("TemplatePatcher", () => {
 
         const patched = await patch("./pseudo.html", "./pseudo.css")
 
-        expect(patched.buffer.toString()).toContain(`i[${patched.scope}]::before`)
+        expect(patched.style?.toString()).toContain(`i[${patched.scope}]::before`)
     })
 
     test("scopes selectors nested inside :not()/:is() and leaves @keyframes untouched", async () => {
@@ -87,7 +87,7 @@ describe("TemplatePatcher", () => {
         )
 
         const patched = await patch("./edge.html", "./edge.css")
-        const css = patched.buffer.toString()
+        const css = patched.style?.toString() ?? ""
 
         expect(css).toContain(`div:not(.a[${patched.scope}],.b[${patched.scope}])[${patched.scope}]`)
         expect(css).toContain("@keyframes spin{from{opacity:0}to{opacity:1}}")
@@ -98,7 +98,7 @@ describe("TemplatePatcher", () => {
         writeFileSync(path.join(dir, "nested.css"), "div:is(.a, .b) .child { color: green; }")
 
         const patched = await patch("./nested.html", "./nested.css")
-        const css = patched.buffer.toString()
+        const css = patched.style?.toString() ?? ""
 
         expect(css).toContain(
             `div:is(.a[${patched.scope}],.b[${patched.scope}]) .child[${patched.scope}]`

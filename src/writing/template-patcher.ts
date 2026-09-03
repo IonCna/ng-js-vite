@@ -16,28 +16,9 @@ function isElement(node: Node): node is Element {
 export class TemplatePatcher {
     private constructor(
         public readonly scope: string,
-        private readonly template: Buffer,
-        private readonly style?: Buffer,
+        public readonly template: Buffer,
+        public readonly style?: Buffer,
     ) {}
-
-    private _buffer!: Buffer;
-
-    public get buffer() {
-        if(this._buffer) return this._buffer;
-
-        const scopedTemplate = TemplatePatcher._scopeTemplate(this.template, this.scope)
-        if (!this.style) return this._buffer = scopedTemplate
-
-        const scopedStyle = TemplatePatcher._scopeStyle(this.style, this.scope)
-        this._buffer = Buffer.concat([
-            Buffer.from("<style data-ng-js-vite>\n"),
-            scopedStyle,
-            Buffer.from("\n</style>\n"),
-            scopedTemplate,
-        ])
-
-        return this._buffer;
-    }
 
     private static _scopeTemplate(template: Buffer, scope: string): Buffer {
         const fragment = parseFragment(template.toString("utf-8"))
@@ -103,7 +84,11 @@ export class TemplatePatcher {
         const { template, style } = await fileReader.read(options)
         const scope = TemplatePatcher._scope(fileReader.templatePath)
 
-        return new TemplatePatcher(scope, template, style)
+        return new TemplatePatcher(
+            scope,
+            TemplatePatcher._scopeTemplate(template, scope),
+            style ? TemplatePatcher._scopeStyle(style, scope) : undefined,
+        )
     }
 
     private static _scope(templatePath: string): string {

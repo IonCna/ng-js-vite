@@ -26,6 +26,16 @@ const callConfigResolved = (plugin: Plugin, config: {root: string, base: string}
     return (plugin.configResolved as Function).call({}, config)
 }
 
+const callLoad = (plugin: Plugin, id: string) => {
+    return (plugin.load as Function).call({}, id)
+}
+
+const styleImportId = (transformedCode: string | undefined) => {
+    const [, quoted] = transformedCode?.match(/^import ("[^"]+\.css")/) ?? []
+    if (!quoted) throw new Error("no style import found in transformed code")
+    return JSON.parse(quoted) as string
+}
+
 const dir = mkdtempSync(path.join(tmpdir(), "ng-js-vite-"))
 const componentPath = path.join(dir, "app-root.component.ts")
 const templatePath = path.join(dir, "app-root.html")
@@ -58,10 +68,11 @@ describe("ngJsTemplateParser transform", () => {
         expect(result?.code).toBe(code.replace("./app-root.html", "/templates/app-root.html"))
     })
 
-    test("inlines styleUrl into the emitted template and leaves the code's styleUrl untouched", async () => {
+    test("rewrites templateUrl, imports the component's styles as a virtual module, and leaves the code's styleUrl untouched", async () => {
         const plugin = ngJsTemplateParser()
         const result = await callTransform(plugin, {}, codeWithStyle, componentPath)
 
+        expect(result?.code).toMatch(/^import "[^"]+\.css";\n/)
         expect(result?.code).toMatch(/templateUrl: "\/?templates\/app-root-[0-9a-f]{8}\.html"/)
         expect(result?.code).toContain(`styleUrl: "./app-root.css"`)
     })
@@ -97,7 +108,7 @@ describe("ngJsTemplateParser transform", () => {
         expect(result?.code).toBe(`{ templateUrl: "/application/templates/rooted.html" }`)
     })
 
-    test("includes inline style content in the generated hash", async () => {
+    test("scopes and exposes each component's styles independently", async () => {
         const firstDir = path.join(dir, "hash-style-a")
         const secondDir = path.join(dir, "hash-style-b")
         mkdirSync(firstDir, {recursive: true})
@@ -113,7 +124,12 @@ describe("ngJsTemplateParser transform", () => {
         const first = await callTransform(plugin, {}, styledCode, path.join(firstDir, "card.ts"))
         const second = await callTransform(plugin, {}, styledCode, path.join(secondDir, "card.ts"))
 
-        expect(first?.code).not.toBe(second?.code)
+        const firstCss = callLoad(plugin, styleImportId(first?.code))
+        const secondCss = callLoad(plugin, styleImportId(second?.code))
+
+        expect(firstCss).toMatch(/div\[_content-[0-9a-f]{8}]\{color:red}/)
+        expect(secondCss).toMatch(/div\[_content-[0-9a-f]{8}]\{color:blue}/)
+        expect(firstCss).not.toBe(secondCss)
     })
 })
 
@@ -144,7 +160,7 @@ describe("ngJsTemplateParser generateBundle", () => {
         expect(warnings[0]).toContain("two templates resolve to")
     })
 
-    test("emits template assets with inlined styles", async () => {
+    test("emits the scoped template without inlining styles", async () => {
         const plugin = ngJsTemplateParser()
         const emits: EmittedAsset[] = []
         const ctx = {
@@ -153,7 +169,7 @@ describe("ngJsTemplateParser generateBundle", () => {
             emitFile: (f: EmittedAsset) => emits.push(f),
         }
 
-        await callTransform(plugin, ctx, codeWithStyle, componentPath)
+        const result = await callTransform(plugin, ctx, codeWithStyle, componentPath)
         await callGenerateBundle(plugin, ctx)
 
         expect(emits).toHaveLength(1)
@@ -161,9 +177,10 @@ describe("ngJsTemplateParser generateBundle", () => {
         const source = emit?.source.toString()
 
         expect(emit?.fileName).toMatch(/templates[\\/]app-root-[0-9a-f]{8}\.html/)
-        expect(source).toContain("<style data-ng-js-vite>")
-        expect(source).toMatch(/\.title\[_content-[0-9a-f]{8}]\{color:red}/)
+        expect(source).not.toContain("<style")
         expect(source).toMatch(/<div _content-[0-9a-f]{8}="">hello<\/div>/)
+
+        expect(callLoad(plugin, styleImportId(result?.code))).toMatch(/\.title\[_content-[0-9a-f]{8}]\{color:red}/)
     })
 
     test("keeps distinct template names when their content is identical", async () => {
@@ -217,7 +234,7 @@ describe("ngJsTemplateParser development server", () => {
 
         expect(response.statusCode).toBe(200)
         expect(headers.get("Content-Type")).toBe("text/html; charset=utf-8")
-        expect(body?.toString()).toMatch(/\.title\[_content-[0-9a-f]{8}]\{color:blue}/)
+        expect(body?.toString()).not.toContain("<style")
         expect(body?.toString()).toMatch(/<div _content-[0-9a-f]{8}="">fresh<\/div>/)
         expect(forwarded).toBeTrue()
 

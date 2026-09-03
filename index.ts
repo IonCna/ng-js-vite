@@ -19,8 +19,11 @@ const DEFAULT_OPTIONS: NgJsTemplateParserOptions = {
     hashed: true,
 }
 
+const VIRTUAL_PREFIX = "\0ng-js-vite:"
+
 export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
     const templates = new Map<string, NgJsTemplateObject>()
+    const styles = new Map<string, string>()
     const options = {
         ...DEFAULT_OPTIONS,
         ...params
@@ -41,14 +44,20 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
 
             const source = await TemplatePatcher.from(fileReader)
 
-            const hashed = reader.hash(source.buffer.toString("utf-8"))
+            const hashed = reader.hash(source.template.toString("utf-8"))
 
             templates.set(fileReader.templatePath, { reader, fileReader, hashed })
 
-            const transformedCode = CodePatcher.from({
+            let transformedCode = CodePatcher.from({
                 code,
                 hashed: options.hashed,
             }, reader, fileReader, hashed)
+
+            if (source.style) {
+                const virtualId = `${VIRTUAL_PREFIX}${source.scope}.css`
+                styles.set(virtualId, source.style.toString("utf-8"))
+                transformedCode = `import ${JSON.stringify(virtualId)};\n${transformedCode}`
+            }
 
             return {
                 code: transformedCode,
@@ -56,35 +65,41 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
             }
         },
 
+        resolveId(id) {
+            if (id.startsWith(VIRTUAL_PREFIX)) return id
+        },
+
+        load(id) {
+            return styles.get(id)
+        },
+
         async generateBundle() {
             const emitted = new Set<string>()
 
             for (const template of templates.values()) {
-                const fileName = path.basename(
-                    options.hashed
-                        ? template.hashed.templateUrl
-                        : template.fileReader.templatePath
-                )
+                const hashedTemplateUrl = template.hashed.templateUrl
+                const rawTemplatePath = template.fileReader.templatePath
 
-                const outputPath = path.join("templates", fileName)
+                const templateUrl = options.hashed ? hashedTemplateUrl : rawTemplatePath
+                const templateName = path.basename(templateUrl)
+                const templateOut = path.join("templates", templateName)
 
-                if (emitted.has(outputPath)) {
+                if (emitted.has(templateOut)) {
                     this.warn(
-                        `ngJsTemplateParser: two templates resolve to "${outputPath}" - skipping "${template.fileReader.templatePath}". ` +
+                        `ngJsTemplateParser: two templates resolve to "${templateOut}" - skipping "${rawTemplatePath}". ` +
                         `Hashed filenames are unique by design; with "hashed: false" templates that share a basename collide. ` +
                         `Rename one of them or enable hashing.`
                     )
                     continue
                 }
+                emitted.add(templateOut)
 
                 const source = await TemplatePatcher.from(template.fileReader)
 
-                emitted.add(outputPath)
-
                 this.emitFile({
                     type: "asset",
-                    fileName: outputPath,
-                    source: source.buffer
+                    fileName: templateOut,
+                    source: source.template,
                 })
             }
         },
@@ -115,7 +130,7 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                         "text/html; charset=utf-8"
                     )
 
-                    res.end(source.buffer)
+                    res.end(source.template)
                 } catch (error) {
                     next(error)
                 }
@@ -125,10 +140,11 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
 }
 
 function getTemplateRequestPath(template: NgJsTemplateObject, hashedFiles: boolean) {
-    const fileName = path.basename(
-        hashedFiles
-            ? template.hashed.templateUrl
-            : template.fileReader.templatePath
-    )
+    const templateUrl = hashedFiles
+        ? template.hashed.templateUrl
+        : template.fileReader.templatePath
+
+    const fileName = path.basename(templateUrl)
+
     return `templates/${fileName}`
 }

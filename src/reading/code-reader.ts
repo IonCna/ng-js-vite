@@ -17,19 +17,15 @@ export class CodeReader {
     private _hash!: string
     private _hashedName!: string
 
-    public get hashStr(): string {
-        return this._hash
-    }
-
-    public get nameStr(): string {
-        return this._hashedName
-    }
-
-    public hash(html: string): CodeHashResult {
-        if(this._hash && this._hashedName) return {
+    public get hashes(): CodeHashResult {
+        return {
             key: this._hash,
             templateUrl: this._hashedName,
         }
+    }
+
+    public hash(html: string): CodeHashResult {
+        if(this._hash && this._hashedName) return this.hashes
 
         const contentHash = createHash("sha256")
         const hashStr = contentHash.update(html).digest("hex").slice(0, 8)
@@ -41,10 +37,7 @@ export class CodeReader {
         this._hash = hashStr
         this._hashedName = `${base}-${hashStr}${extension}`
 
-        return {
-            key: this._hash,
-            templateUrl: this._hashedName,
-        }
+        return this.hashes
     }
 
     static from(content: string): CodeReader {

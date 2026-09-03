@@ -4,16 +4,17 @@ Vite plugin for AngularJS apps that keeps external component templates working a
 
 It finds a component `templateUrl`, copies that HTML template into the final build, gives it a content hash, and rewrites the URL so AngularJS can load it in production.
 
-If the same component also has a `styleUrl`, the CSS is inlined into the emitted template and scoped to it, the same way Angular's emulated view encapsulation works: every element in the template and every selector in the style block get a unique attribute, so styles never leak into other components.
+If the same component also has a `styleUrl`, that CSS is scoped to the template the same way Angular's emulated view encapsulation works: every element in the template and every selector in the style get a matching unique attribute, so styles never leak between components. The scoped CSS is handed to Vite's own CSS pipeline, so it ends up in Vite's bundled stylesheet (`assets/index-[hash].css`) and is linked from `index.html` automatically. The emitted template is just the scoped HTML — no `<style>` block:
 
 ```html
-<style data-ng-js-vite>
-.title[_content-a1b2c3d4] { color: red; }
-</style>
-
 <div _content-a1b2c3d4>
   <!-- component html -->
 </div>
+```
+
+```css
+/* merged into Vite's bundled stylesheet */
+.title[_content-a1b2c3d4] { color: red; }
 ```
 
 ## Example
@@ -30,7 +31,7 @@ const appRootComponent = {
 angular.module("app").component("appRoot", appRootComponent)
 ```
 
-`styleUrl` is a plugin-only property. AngularJS does not load it by itself; `ng-js-vite` reads it at build time and inlines the scoped CSS into the emitted template. The original `styleUrl` declaration is left untouched in the compiled component — AngularJS ignores unknown component options, so it's harmless.
+`styleUrl` is a plugin-only property. AngularJS does not load it by itself; `ng-js-vite` reads it at build time, scopes the CSS, and adds it to Vite's CSS bundle. The original `styleUrl` declaration is left untouched in the compiled component — AngularJS ignores unknown component options, so it's harmless.
 
 With the default config, the template is emitted as something like:
 
@@ -66,7 +67,7 @@ export default defineConfig({
 
 For now, this plugin supports **one `templateUrl` per source file**.
 
-If a `styleUrl` exists in that same file, it is paired with that template and inlined into it.
+If a `styleUrl` exists in that same file, it is paired with that template, scoped to it, and added to Vite's CSS bundle.
 
 Recommended component shape:
 
@@ -134,6 +135,12 @@ If your app uses routes, keep a base tag in `index.html` so AngularJS resolves t
 
 ## Changelog
 
+### Scoped CSS goes through Vite's CSS pipeline
+
+Component `styleUrl` CSS is no longer inlined as a `<style>` block inside the emitted template. It is still scoped to the component in the same way, but now it is injected as a virtual CSS module import into the compiled component, so Vite processes it like any other stylesheet: it is merged into Vite's bundled CSS (`assets/index-[hash].css`), hashed, and linked from `index.html` automatically. Emitted templates now contain only the scoped HTML.
+
+This means templates stop re-shipping duplicate CSS on every `$templateRequest`, and the browser caches one normal `.css` asset instead of re-parsing inline `<style>` blocks.
+
 ### CSS isolation (view encapsulation)
 
 Component styles declared via `styleUrl` are now scoped to their own template, the same way Angular's emulated view encapsulation works: a component's styles never leak out, and other components' styles never leak into it.
@@ -151,4 +158,4 @@ Known limitations:
 
 ### `styleUrl` is no longer rewritten in compiled code
 
-Previously the plugin replaced `styleUrl: "..."` in the compiled component with `ngJsViteInlineStyle: true`. Since AngularJS ignores unknown component options, and the CSS is now inlined and scoped at the template level regardless, that rewrite was unnecessary and has been removed — `styleUrl` is left untouched in your compiled code.
+Previously the plugin replaced `styleUrl: "..."` in the compiled component with `ngJsViteInlineStyle: true`. Since AngularJS ignores unknown component options, and the CSS is scoped and bundled regardless, that rewrite was unnecessary and has been removed — `styleUrl` is left untouched in your compiled code.
