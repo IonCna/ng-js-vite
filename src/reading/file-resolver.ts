@@ -1,6 +1,10 @@
-import type {CodeReader} from "@ng-js-vite/reading/code-reader.ts";
+import {CodeReader} from "@ng-js-vite/reading/code-reader.ts";
 import path from "node:path";
 import {readFile} from "node:fs/promises";
+
+type FileReaderReadOptions = {
+    preventCache?: boolean
+}
 
 export class FileReader {
     private static root= process.cwd()
@@ -18,8 +22,8 @@ export class FileReader {
         public readonly stylePath?: string,
     ) {}
 
-    public async read(refresh = false) {
-        if(this._template && !refresh) return {
+    public async read(options: FileReaderReadOptions = { }) {
+        if(this._template && !options.preventCache) return {
             template: this._template,
             style: this._style
         }
@@ -60,7 +64,10 @@ export class FileReader {
     }
 
     static validate(id: string, content: string) {
-        const [cleanId = id] = id.split("?")
+        const [cleanId = id, query] = id.split("?")
+        const queryParams = new URLSearchParams(query)
+        if (queryParams.has("raw")) return false
+
         const isBanned = [...FileReader.blacklist].some(
             entry => cleanId.split(/[\\/]/).includes(entry)
         )
@@ -70,7 +77,7 @@ export class FileReader {
         const isCandidate = candidates.test(cleanId)
 
         if(!isCandidate) return false
-        return content.includes("templateUrl")
+        return CodeReader.templateRegExp.test(content)
     }
 
     private static _resolve(templateUrl: string, id: string) {

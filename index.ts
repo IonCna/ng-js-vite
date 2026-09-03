@@ -40,7 +40,11 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
             const fileReader = FileReader.parse(reader, id)
 
             const content = await fileReader.read()
-            const source = TemplatePatcher.from(content)
+            const source = TemplatePatcher.from({
+                ...content,
+                scope: TemplatePatcher.scope(fileReader.templatePath),
+            })
+
             const hashed = reader.hash(source.toString("utf-8"))
 
             templates.set(fileReader.templatePath, { reader, fileReader, hashed })
@@ -78,9 +82,13 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                     continue
                 }
 
-                const source = TemplatePatcher.from(
-                    await template.fileReader.read()
-                )
+                const { template: templateBuffer, style: styleBuffer } = await template.fileReader.read()
+
+                const source = TemplatePatcher.from({
+                    template: templateBuffer,
+                    scope: TemplatePatcher.scope(template.fileReader.templatePath),
+                    style: styleBuffer
+                })
 
                 emitted.add(outputPath)
 
@@ -110,9 +118,13 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                 if (!template) return next();
 
                 try {
-                    const source = TemplatePatcher.from(
-                        await template.fileReader.read(true)
-                    )
+                    const { template: templateBuffer, style: styleBuffer } = await template.fileReader.read({ preventCache: true })
+
+                    const source = TemplatePatcher.from({
+                        template: templateBuffer,
+                        scope: TemplatePatcher.scope(template.fileReader.templatePath),
+                        style: styleBuffer
+                    })
 
                     res.statusCode = 200
                     res.setHeader(

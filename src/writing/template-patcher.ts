@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+
 export type TemplatePatcherParams = {
-    template: Buffer
+    template: Buffer,
+    scope?: string,
     style?: Buffer
 }
 
@@ -13,5 +16,14 @@ export class TemplatePatcher {
             Buffer.from("\n</style>\n"),
             template,
         ])
+    }
+
+    static scope(templatePath: string): string {
+        const hash = createHash("sha256")
+            .update(templatePath)
+            .digest("hex")
+            .slice(0, 8)
+
+        return `_content-${hash}`
     }
 }

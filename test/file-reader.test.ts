@@ -22,9 +22,15 @@ describe("FileReader.validate", () => {
         expect(FileReader.validate("src/card.js?direct", component)).toBeTrue()
     })
 
+    test("rejects raw module ids", () => {
+        expect(FileReader.validate("src/card.ts?raw", component)).toBeFalse()
+        expect(FileReader.validate("src/card.ts?raw&used", component)).toBeFalse()
+    })
+
     test("rejects unsupported files, missing templates and node_modules", () => {
         expect(FileReader.validate("src/card.html", component)).toBeFalse()
         expect(FileReader.validate("src/card.ts", "const value = 1")).toBeFalse()
+        expect(FileReader.validate("src/helper.ts", "return component.$factory.templateUrl")).toBeFalse()
         expect(FileReader.validate("/repo/node_modules/pkg/card.ts", component)).toBeFalse()
         expect(FileReader.validate("C:\\repo\\node_modules\\pkg\\card.ts", component)).toBeFalse()
     })
@@ -80,7 +86,7 @@ describe("FileReader.read", () => {
         expect((await files.read()).template.toString()).toBe("first")
         writeFileSync(templatePath, "second")
         expect((await files.read()).template.toString()).toBe("first")
-        expect((await files.read(true)).template.toString()).toBe("second")
+        expect((await files.read({ preventCache: true })).template.toString()).toBe("second")
     })
 
     test("rejects when a referenced file does not exist", async () => {
