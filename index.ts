@@ -1,23 +1,18 @@
 import { type Plugin } from "vite"
-import { isValidFiles } from "./src/utils/is-valid-files.ts";
-import { obtainTemplateUrl } from "./src/utils/obtain-template-url.ts";
-import { obtainStyleUrl } from "./src/utils/obtain-style-url.ts";
-import { createHashedName } from "./src/utils/hash-name.ts";
 import path from "node:path";
-import { readFileSync } from "node:fs"
-import { readFile } from "node:fs/promises"
-import { resolveTemplatePath } from "./src/utils/resolve-template-path.ts";
+import {FileReader} from "@ng-js-vite/reading/file-resolver.ts";
+import {type CodeHashResult, CodeReader} from "@ng-js-vite/reading/code-reader.ts";
+import {CodePatcher} from "@ng-js-vite/writing/code-patcher.ts";
+import {TemplatePatcher} from "@ng-js-vite/writing/template-patcher.ts";
 
 type NgJsTemplateParserOptions = {
     hashed?: boolean;
 }
 
 type NgJsTemplateObject = {
-    defaultName: string,
-    hashedName: string,
-    dir: string,
-    sourceId: string,
-    stylePath?: string,
+    reader: CodeReader,
+    fileReader: FileReader,
+    hashed: CodeHashResult
 }
 
 const DEFAULT_OPTIONS: NgJsTemplateParserOptions = {
@@ -31,67 +26,30 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
         ...params
     }
 
-    let base = "/"
-    const root = process.cwd()
-
     return {
         name: 'ngJsTemplateParser',
 
         configResolved(config) {
-            base = config.base.endsWith("/") ? config.base : `${config.base}/`;
+            FileReader.configure(config.root, config.base)
         },
 
         async transform(code, id) {
-            if (!isValidFiles(id)) return
+            if(!FileReader.validate(id, code)) return
 
-            const templateObj = obtainTemplateUrl(code)
-            if (!templateObj) return
+            const reader = CodeReader.from(code)
+            const fileReader = FileReader.parse(reader, id)
 
-            const styleObj = obtainStyleUrl(code)
-            let transformedCode = code
+            const content = await fileReader.read()
+            const source = TemplatePatcher.from(content)
+            const hashed = reader.hash(source.toString("utf-8"))
 
-            const { templateUrl } = templateObj
-            const templatePath = resolveTemplatePath(
-                root,
-                id,
-                templateUrl
-            )
+            templates.set(fileReader.templatePath, { reader, fileReader, hashed })
 
-            const stylePath = styleObj
-                ? resolveTemplatePath(root, id, styleObj.styleUrl)
-                : undefined
-
-            const source = await readTemplateWithInlineStyle.call(
-                this,
-                templateUrl,
-                templatePath,
-                id,
-                styleObj?.styleUrl,
-                stylePath
-            )
-
-            const defaultName = path.basename(templatePath)
-            const hashed = createHashedName(
-                defaultName,
-                source
-            )
-
-            templates.set(templatePath, {
-                defaultName,
-                hashedName: hashed.value,
-                dir: path.dirname(templatePath),
-                sourceId: id,
-                stylePath,
-            })
-
-            const outputName = options.hashed ? hashed.value : defaultName
-            const publicUrl = `${base}templates/${outputName}`;
-
-            transformedCode = transformedCode.replace(templateUrl, publicUrl)
-
-            if (styleObj) {
-                transformedCode = transformedCode.replace(styleObj.match, "ngJsViteInlineStyle: true")
-            }
+            const transformedCode = CodePatcher.from({
+                code,
+                hashed: options.hashed,
+                styleIsolate: true,
+            }, reader, fileReader, hashed)
 
             return {
                 code: transformedCode,
@@ -103,32 +61,25 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
             const emitted = new Set<string>()
 
             for (const template of templates.values()) {
-                let fileName = options.hashed ? template.hashedName : template.defaultName
-                fileName = fileName.replace(/^\/+/, "")
+                const fileName = path.basename(
+                    options.hashed
+                        ? template.hashed.templateUrl
+                        : template.fileReader.templatePath
+                )
 
                 const outputPath = path.join("templates", fileName)
 
                 if (emitted.has(outputPath)) {
                     this.warn(
-                        `ngJsTemplateParser: two templates resolve to "${outputPath}" - skipping the one referenced from "${template.sourceId}". ` +
+                        `ngJsTemplateParser: two templates resolve to "${outputPath}" - skipping "${template.fileReader.templatePath}". ` +
                         `Hashed filenames are unique by design; with "hashed: false" templates that share a basename collide. ` +
                         `Rename one of them or enable hashing.`
                     )
                     continue
                 }
 
-                const sourcePath = path.join(
-                    template.dir,
-                    template.defaultName
-                )
-
-                const source = await readTemplateWithInlineStyle.call(
-                    this,
-                    sourcePath,
-                    sourcePath,
-                    template.sourceId,
-                    template.stylePath,
-                    template.stylePath
+                const source = TemplatePatcher.from(
+                    await template.fileReader.read()
                 )
 
                 emitted.add(outputPath)
@@ -142,12 +93,12 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
         },
 
         configureServer(server) {
-            server.middlewares.use((req, res, next) => {
+            server.middlewares.use(async (req, res, next) => {
                 const url = req.url
                 if (!url) return next();
 
                 let pathname = new URL(url, "http://ng-js-vite.local").pathname.replace(/^\/+/, "")
-                const normalizedBase = base.replace(/^\/+|\/+$/g, "")
+                const normalizedBase = FileReader.base.replace(/^\/+|\/+$/g, "")
                 if (normalizedBase && pathname.startsWith(`${normalizedBase}/`)) {
                     pathname = pathname.slice(normalizedBase.length + 1)
                 }
@@ -159,14 +110,8 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                 if (!template) return next();
 
                 try {
-                    const filePath = path.join(
-                        template.dir,
-                        template.defaultName
-                    )
-
-                    const source = readTemplateWithInlineStyleSync(
-                        filePath,
-                        template.stylePath
+                    const source = TemplatePatcher.from(
+                        await template.fileReader.read(true)
                     )
 
                     res.statusCode = 200
@@ -184,55 +129,11 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
     }
 }
 
-async function readTemplateWithInlineStyle(
-    this: { error: (message: string) => never },
-    templateUrl: string,
-    templatePath: string,
-    sourceId: string,
-    styleUrl?: string,
-    stylePath?: string,
-) {
-    let template!: Buffer
-    try {
-        template = await readFile(templatePath)
-    } catch (error) {
-        this.error(
-            `ngJsTemplateParser: could not read template "${templateUrl}" (resolved to "${templatePath}") referenced from "${sourceId}": ${(error as Error).message}`
-        )
-    }
-
-    if (!stylePath) return template
-
-    let style!: Buffer
-    try {
-        style = await readFile(stylePath)
-    } catch (error) {
-        this.error(
-            `ngJsTemplateParser: could not read style "${styleUrl}" (resolved to "${stylePath}") referenced from "${sourceId}": ${(error as Error).message}`
-        )
-    }
-
-    return inlineStyle(template, style)
-}
-
-function readTemplateWithInlineStyleSync(templatePath: string, stylePath?: string) {
-    const template = readFileSync(templatePath)
-    if (!stylePath) return template
-
-    const style = readFileSync(stylePath)
-    return inlineStyle(template, style)
-}
-
-function inlineStyle(template: Buffer, style: Buffer) {
-    return Buffer.concat([
-        Buffer.from(`<style data-ng-js-vite>\n`),
-        style,
-        Buffer.from(`\n</style>\n`),
-        template,
-    ])
-}
-
 function getTemplateRequestPath(template: NgJsTemplateObject, hashedFiles: boolean) {
-    const fileName = hashedFiles ? template.hashedName : template.defaultName
+    const fileName = path.basename(
+        hashedFiles
+            ? template.hashed.templateUrl
+            : template.fileReader.templatePath
+    )
     return `templates/${fileName}`
 }

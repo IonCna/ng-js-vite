@@ -14,7 +14,9 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
-
+    "paths": {
+      "@ng-js-vite/*": ["./src/*"]
+    },
     // Best practices
     "strict": true,
     "skipLibCheck": true,
