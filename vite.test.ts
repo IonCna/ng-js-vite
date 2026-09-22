@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import type { Plugin } from "vite"
-import { ngJsTemplateParser } from "./index.ts"
+import { ngJsTemplateParser } from "./vite.ts"
 import {FileReader} from "@ng-js-vite/reading/file-resolver"
 
 type TransformHook = Exclude<Plugin["transform"], undefined>

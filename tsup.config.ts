@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup"
 
 export default defineConfig({
-    entry: { index: "index.ts", core: "src/core.ts" },
+    entry: { vite: "vite.ts", esbuild: "esbuild.ts" },
     format: ["esm"],
     dts: true,
     clean: true,
