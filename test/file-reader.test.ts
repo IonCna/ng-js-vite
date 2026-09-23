@@ -2,8 +2,8 @@ import {afterAll, beforeEach, describe, expect, test} from "bun:test"
 import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from "node:fs"
 import {tmpdir} from "node:os"
 import path from "node:path"
-import {CodeReader} from "@ng-js-vite/reading/code-reader"
-import {FileReader} from "@ng-js-vite/reading/file-resolver"
+import {CodeReader} from "@ng-js-vite/reading/code-reader.ts"
+import {FileReader} from "@ng-js-vite/reading/file-resolver.ts"
 
 const root = mkdtempSync(path.join(tmpdir(), "ng-js-vite-file-reader-"))
 const componentDir = path.join(root, "src", "components")

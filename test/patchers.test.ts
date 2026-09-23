@@ -2,10 +2,10 @@ import {afterAll, beforeEach, describe, expect, test} from "bun:test"
 import {mkdtempSync, rmSync, writeFileSync} from "node:fs"
 import {tmpdir} from "node:os"
 import path from "node:path"
-import {CodeReader} from "@ng-js-vite/reading/code-reader"
-import {FileReader} from "@ng-js-vite/reading/file-resolver"
-import {CodePatcher} from "@ng-js-vite/writing/code-patcher"
-import {TemplatePatcher} from "@ng-js-vite/writing/template-patcher"
+import {CodeReader} from "@ng-js-vite/reading/code-reader.ts"
+import {FileReader} from "@ng-js-vite/reading/file-resolver.ts"
+import {CodePatcher} from "@ng-js-vite/writing/code-patcher.ts"
+import {TemplatePatcher} from "@ng-js-vite/writing/template-patcher.ts"
 
 beforeEach(() => FileReader.configure(process.cwd(), "/app/"))
 

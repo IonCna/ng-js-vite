@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import type { Plugin } from "vite"
 import { ngJsTemplateParser } from "./vite.ts"
-import {FileReader} from "@ng-js-vite/reading/file-resolver"
+import {FileReader} from "@ng-js-vite/reading/file-resolver.ts"
 
 type TransformHook = Exclude<Plugin["transform"], undefined>
 type GenerateBundleHook = Exclude<Plugin["generateBundle"], undefined>

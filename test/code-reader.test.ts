@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test"
-import {CodeReader} from "@ng-js-vite/reading/code-reader"
+import {CodeReader} from "@ng-js-vite/reading/code-reader.ts"
 
 describe("CodeReader", () => {
     test("reads templateUrl and optional styleUrl with either quote style", () => {
