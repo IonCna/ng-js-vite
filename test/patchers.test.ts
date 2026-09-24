@@ -105,3 +105,42 @@ describe("TemplatePatcher", () => {
         )
     })
 })
+
+describe("TemplatePatcher — :host", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "template-patcher-host-"))
+
+    afterAll(() => rmSync(dir, {recursive: true, force: true}))
+
+    const style = async (selector: string | undefined, css: string) => {
+        writeFileSync(path.join(dir, "host.html"), "<p></p>")
+        writeFileSync(path.join(dir, "host.css"), css)
+        const selectorField = selector === undefined ? "" : `selector: "${selector}", `
+        const reader = CodeReader.from(`@Component({ ${selectorField}templateUrl: "./host.html", styleUrl: "./host.css" })`)
+        const patched = await TemplatePatcher.from(FileReader.parse(reader, path.join(dir, "host.ts")))
+        return patched.style!.toString().replaceAll(patched.scope, "S")
+    }
+
+    test(":host → el selector del componente, sin atributo de contenido", async () => {
+        expect(await style("app-card", ":host { display: block }")).toBe("app-card{display:block}")
+    })
+
+    test(":host(.x) → compuesto sobre el host; lo que sigue al host sí se escopea", async () => {
+        expect(await style("app-card", ":host(.active) .x { a: b }")).toBe("app-card.active .x[S]{a:b}")
+        expect(await style("app-card", ":host > li::before { a: b }")).toBe("app-card>li[S]::before{a:b}")
+    })
+
+    test(":host-context(.x) → ancestro o el host mismo (dos selectores, como Angular)", async () => {
+        expect(await style("app-card", ":host-context(.dark) p { a: b }")).toBe(".dark app-card p[S],app-card.dark p[S]{a:b}")
+    })
+
+    test("selector con coma → :is(...), sin scope adentro; un tag[attr] se usa tal cual", async () => {
+        expect(await style("app-a, app-b", ":host(.x) { a: b }")).toBe(":is(app-a,app-b).x{a:b}")
+        expect(await style("app-a[role=tab]", ":host { a: b }")).toBe("app-a[role=tab]{a:b}")
+    })
+
+    test("dentro de :not() y de @media también; sin selector en el decorador queda como antes", async () => {
+        expect(await style("app-card", ":not(:host) span { a: b }")).toBe(":not(app-card) span[S]{a:b}")
+        expect(await style("app-card", "@media (min-width: 1px) { :host { a: b } }")).toBe("@media (min-width:1px){app-card{a:b}}")
+        expect(await style(undefined, ".x { a: b }")).toBe(".x[S]{a:b}")
+    })
+})

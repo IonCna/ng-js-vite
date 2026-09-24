@@ -8,10 +8,13 @@ export type CodeHashResult = {
 export class CodeReader {
     static templateRegExp = /templateUrl\s*:\s*(['"])(.*?)\1/
     static styleRegExp = /styleUrl\s*:\s*(['"])(.*?)\1/
+    /** El `selector` del decorador: es el host del componente (`:host` del CSS se traduce a él). */
+    static selectorRegExp = /\bselector\s*:\s*(['"])(.*?)\1/
 
     private constructor(
         public readonly templateUrl: string,
-        public readonly styleUrl?: string
+        public readonly styleUrl?: string,
+        public readonly selector?: string,
     ) {}
 
     private _hash!: string
@@ -43,8 +46,9 @@ export class CodeReader {
     static from(content: string): CodeReader {
         const templateUrl = CodeReader._getTemplate(content)
         const styleUrl = CodeReader._getStyle(content)
+        const selector = content.match(CodeReader.selectorRegExp)?.[2]
 
-        return new CodeReader(templateUrl, styleUrl)
+        return new CodeReader(templateUrl, styleUrl, selector)
     }
 
     private static _getStyle(content: string): string | undefined {

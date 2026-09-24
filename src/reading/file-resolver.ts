@@ -20,6 +20,8 @@ export class FileReader {
     private constructor(
         public readonly templatePath: string,
         public readonly stylePath?: string,
+        /** El `selector` del componente — a qué se traduce `:host` en su CSS (`TemplatePatcher`). */
+        public readonly hostSelector?: string,
     ) {}
 
     public async read(options: FileReaderReadOptions = { }) {
@@ -57,10 +59,10 @@ export class FileReader {
 
         if(reader.styleUrl) {
             const styleLocation = FileReader._resolve(reader.styleUrl, id)
-            return new FileReader(templateLocation, styleLocation)
+            return new FileReader(templateLocation, styleLocation, reader.selector)
         }
 
-        return new FileReader(templateLocation)
+        return new FileReader(templateLocation, undefined, reader.selector)
     }
 
     static validate(id: string, content: string) {

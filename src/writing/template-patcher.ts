@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type DefaultTreeAdapterMap, parseFragment, serialize } from "parse5";
 import * as csstree from "css-tree";
 import { FileReader, type FileReaderReadOptions } from "@ng-js-vite/reading/file-resolver.ts";
+import { HostSelector } from "@ng-js-vite/writing/host-selector.ts";
 
 type Node = DefaultTreeAdapterMap["childNode"]
 type Element = DefaultTreeAdapterMap["element"]
@@ -33,7 +34,7 @@ export class TemplatePatcher {
         return Buffer.from(serialize(fragment), "utf-8")
     }
 
-    private static _scopeStyle(style: Buffer, scope: string): Buffer {
+    private static _scopeStyle(style: Buffer, scope: string, host: HostSelector | undefined): Buffer {
         const ast = csstree.parse(style.toString("utf-8"))
 
         csstree.walk(ast, {
@@ -43,25 +44,38 @@ export class TemplatePatcher {
                 if (atruleName && KEYFRAMES_AT_RULE.test(atruleName)) return
                 if (rule.prelude?.type !== "SelectorList") return
 
-                TemplatePatcher._scopeSelectorList(scope, rule.prelude)
+                TemplatePatcher._scopeSelectorList(scope, host, rule.prelude)
             }
         })
 
         return Buffer.from(csstree.generate(ast), "utf-8")
     }
 
-    private static _scopeSelectorList(scope: string, selectorList: csstree.SelectorList): void {
-        selectorList.children.forEach(selector => TemplatePatcher._scopeSelector(scope, selector as csstree.Selector))
-    }
-
-    private static _scopeSelector(scope: string, selector: csstree.Selector): void {
-        selector.children.forEach(child => {
-            if (child.type !== "PseudoClassSelector" || !NESTED_SELECTOR_PSEUDO_CLASS.test(child.name) || !child.children) return
-
-            child.children.forEach(argument => {
-                if (argument.type === "SelectorList") TemplatePatcher._scopeSelectorList(scope, argument)
+    /** Cada selector: `:host*` → el selector del componente (puede dar dos, `:host-context`), después el scope. */
+    private static _scopeSelectorList(scope: string, host: HostSelector | undefined, selectorList: csstree.SelectorList): void {
+        const selectors = selectorList.children.toArray().flatMap(node => {
+            const selector = node as csstree.Selector
+            const variants = host ? host.expand(selector) : [{ nodes: selector.children.toArray(), targetsHost: false }]
+            return variants.map(({ nodes, targetsHost }) => {
+                const scoped: csstree.Selector = { type: "Selector", children: new csstree.List<csstree.CssNode>().fromArray(nodes) }
+                TemplatePatcher._scopeSelector(scope, host, scoped, targetsHost)
+                return scoped as csstree.CssNode
             })
         })
+        selectorList.children = new csstree.List<csstree.CssNode>().fromArray(selectors)
+    }
+
+    /** El atributo de contenido va en el último compuesto — salvo que ese sea el host (no es parte del template). */
+    private static _scopeSelector(scope: string, host: HostSelector | undefined, selector: csstree.Selector, targetsHost: boolean): void {
+        selector.children.forEach(child => {
+            if (child.type !== "PseudoClassSelector" || !NESTED_SELECTOR_PSEUDO_CLASS.test(child.name) || !child.children) return
+            if (HostSelector.isHostNode(child)) return
+
+            child.children.forEach(argument => {
+                if (argument.type === "SelectorList") TemplatePatcher._scopeSelectorList(scope, host, argument)
+            })
+        })
+        if (targetsHost) return
 
         const attribute: csstree.AttributeSelector = {
             type: "AttributeSelector",
@@ -87,7 +101,7 @@ export class TemplatePatcher {
         return new TemplatePatcher(
             scope,
             TemplatePatcher._scopeTemplate(template, scope),
-            style ? TemplatePatcher._scopeStyle(style, scope) : undefined,
+            style ? TemplatePatcher._scopeStyle(style, scope, HostSelector.from(fileReader.hostSelector)) : undefined,
         )
     }
 
