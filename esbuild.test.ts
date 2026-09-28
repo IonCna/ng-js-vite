@@ -106,6 +106,16 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         expect(card).not.toContain("ɵngContent")
     })
 
+    test("ownersOf: el componente dueño de cada template y CSS (para recargar en el dev-server)", async () => {
+        writeFileSync(path.join(dir, "card.html"), "<p>x</p>")
+        writeFileSync(path.join(dir, "card.css"), "p { color: red; }")
+        const files = TemplateFiles.create({ hashed: false })
+        await files.transform(card, path.join(dir, "card.ts"))
+        expect(files.ownersOf(path.join(dir, "card.html"))).toEqual([path.join(dir, "card.ts")])
+        expect(files.ownersOf(path.join(dir, "card.css"))).toEqual([path.join(dir, "card.ts")])
+        expect(files.ownersOf(path.join(dir, "otro.html"))).toEqual([])
+    })
+
     test("sin styleUrl no hay link ni carpeta styles/", async () => {
         writeFileSync(path.join(dir, "card.html"), "<div></div>")
         const files = TemplateFiles.create()

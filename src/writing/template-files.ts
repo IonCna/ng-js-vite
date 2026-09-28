@@ -96,6 +96,8 @@ export class TemplateFiles {
   static readonly STYLES_DIR = "styles";
 
   private readonly templates = new PublishedDir(TemplateFiles.DIR, "template", "text/html; charset=utf-8");
+  /** `.html`/`.css` fuente → los componentes (`.ts`) que lo usan (ver `ownersOf`). */
+  private readonly owners = new Map<string, Set<string>>();
   private readonly styles = new PublishedDir(TemplateFiles.STYLES_DIR, "style", "text/css; charset=utf-8");
   private readonly hashed: boolean;
   private readonly base: string;
@@ -119,6 +121,8 @@ export class TemplateFiles {
 
     const templateName = this.templateName(reader, fileReader, patched.template);
     this.templates.register(templateName, fileReader);
+    this.addOwner(fileReader.templatePath, filePath);
+    if (fileReader.stylePath) this.addOwner(fileReader.stylePath, filePath);
     // El compilador decide `transclude: true` viendo `<ng-content>` en el template; con `templateUrl` no lo ve, así
     // que se le avisa con `ɵngContent` (sin eso AngularJS tira el contenido proyectado del componente).
     const projectsContent = /<ng-content[\s>/]/.test(patched.template.toString("utf-8"));
@@ -131,6 +135,22 @@ export class TemplateFiles {
     const styleName = this.styleName(fileReader.stylePath, patched.style, patched.scope);
     this.styles.register(styleName, fileReader);
     return StyleInjector.link(rewritten, this.url(this.styles, styleName));
+  }
+
+  /**
+   * Los componentes (`.ts`) cuyo `templateUrl`/`styleUrl` es `file`. El dev-server los da por cambiados cuando cambia
+   * el `.html`/`.css` (no están en el grafo de módulos de Vite: los sirve `middleware()`), así se recompilan — un
+   * `<ng-content>` nuevo cambia `ɵngContent` — y la página recarga.
+   */
+  ownersOf(file: string): string[] {
+    return [...(this.owners.get(path.resolve(file)) ?? [])];
+  }
+
+  private addOwner(source: string, component: string): void {
+    const key = path.resolve(source);
+    let components = this.owners.get(key);
+    if (!components) this.owners.set(key, (components = new Set()));
+    components.add(path.resolve(component));
   }
 
   /** Escribe cada template y CSS escopeado en `<outDir>/templates/` y `<outDir>/styles/`. */
