@@ -96,6 +96,16 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         expect(readFileSync(path.join(out, "styles", emitted!), "utf8")).toMatch(/\.card\[_content-[0-9a-f]{8}\]/)
     })
 
+    test("un template con <ng-content> agrega ɵngContent (el compilador no ve el template para decidir transclude)", async () => {
+        writeFileSync(path.join(dir, "panel.html"), "<section><ng-content></ng-content></section>")
+        writeFileSync(path.join(dir, "card.html"), "<p>ng-content no es un tag acá</p>")
+        const files = TemplateFiles.create({ hashed: false })
+        const panel = await files.transform(`@Component({ selector: "app-panel", templateUrl: "./panel.html" }) class Panel {}`, path.join(dir, "panel.ts"))
+        const card = await files.transform(`@Component({ selector: "app-card", templateUrl: "./card.html" }) class Card {}`, path.join(dir, "card.ts"))
+        expect(panel).toContain(`templateUrl: "/templates/panel.html", ɵngContent: true`)
+        expect(card).not.toContain("ɵngContent")
+    })
+
     test("sin styleUrl no hay link ni carpeta styles/", async () => {
         writeFileSync(path.join(dir, "card.html"), "<div></div>")
         const files = TemplateFiles.create()

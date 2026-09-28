@@ -119,9 +119,12 @@ export class TemplateFiles {
 
     const templateName = this.templateName(reader, fileReader, patched.template);
     this.templates.register(templateName, fileReader);
+    // El compilador decide `transclude: true` viendo `<ng-content>` en el template; con `templateUrl` no lo ve, así
+    // que se le avisa con `ɵngContent` (sin eso AngularJS tira el contenido proyectado del componente).
+    const projectsContent = /<ng-content[\s>/]/.test(patched.template.toString("utf-8"));
     const rewritten = code.replace(
       CodeReader.templateRegExp,
-      `templateUrl: ${JSON.stringify(this.url(this.templates, templateName))}`,
+      `templateUrl: ${JSON.stringify(this.url(this.templates, templateName))}${projectsContent ? ", ɵngContent: true" : ""}`,
     );
     if (!patched.style || !fileReader.stylePath) return rewritten;
 
