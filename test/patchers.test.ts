@@ -136,6 +136,10 @@ describe("TemplatePatcher — :host", () => {
     test("selector con coma → :is(...), sin scope adentro; un tag[attr] se usa tal cual", async () => {
         expect(await style("app-a, app-b", ":host(.x) { a: b }")).toBe(":is(app-a,app-b).x{a:b}")
         expect(await style("app-a[role=tab]", ":host { a: b }")).toBe("app-a[role=tab]{a:b}")
+        expect(await style("[ngbDatepickerDayView]", ":host(.outside) { a: b }")).toBe("[ngb-datepicker-day-view].outside{a:b}")
+        expect(await style("[ngbDatepickerDayView]", ":host(:hover:not(.bg-primary)) { a: b }")).toBe("[ngb-datepicker-day-view]:hover:not(.bg-primary){a:b}")
+        expect(await style("app-card", ".x:not(.y) { a: b }")).toBe(".x:not(.y[S])[S]{a:b}")
+        expect(await style("button[ngbNavLink]", ":host { a: b }")).toBe("button[ngb-nav-link]{a:b}")
     })
 
     test("dentro de :not() y de @media también; sin selector en el decorador queda como antes", async () => {

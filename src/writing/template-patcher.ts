@@ -67,6 +67,9 @@ export class TemplatePatcher {
 
     /** El atributo de contenido va en el último compuesto — salvo que ese sea el host (no es parte del template). */
     private static _scopeSelector(scope: string, host: HostSelector | undefined, selector: csstree.Selector, targetsHost: boolean): void {
+        // El host no lleva el atributo: tampoco los `:not(...)`/`:is(...)` que lo filtran (`:host(:not(.x))`).
+        if (targetsHost) return
+
         selector.children.forEach(child => {
             if (child.type !== "PseudoClassSelector" || !NESTED_SELECTOR_PSEUDO_CLASS.test(child.name) || !child.children) return
             if (HostSelector.isHostNode(child)) return
@@ -75,7 +78,6 @@ export class TemplatePatcher {
                 if (argument.type === "SelectorList") TemplatePatcher._scopeSelectorList(scope, host, argument)
             })
         })
-        if (targetsHost) return
 
         const attribute: csstree.AttributeSelector = {
             type: "AttributeSelector",

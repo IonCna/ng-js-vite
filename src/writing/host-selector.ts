@@ -22,11 +22,19 @@ export class HostSelector {
     private constructor(private readonly host: csstree.CssNode[]) {}
 
     static from(selector: string | undefined): HostSelector | undefined {
-        const trimmed = selector?.trim()
+        const trimmed = selector?.trim().replace(/\[([A-Za-z_$][\w$-]*)/g, (_match, name: string) => `[${HostSelector.kebab(name)}`)
         if (!trimmed) return undefined
         const source = trimmed.includes(",") ? `:is(${trimmed})` : trimmed
         const parsed = csstree.parse(source, { context: "selector" }) as csstree.Selector
         return new HostSelector(parsed.children.toArray())
+    }
+
+    /**
+     * `[ngbDatepickerDayView]` → `[ngb-datepicker-day-view]`: AngularJS registra el atributo en camelCase y lo
+     * matchea escrito en kebab-case en el DOM, que es lo que ve el CSS.
+     */
+    private static kebab(name: string): string {
+        return name.replace(/[A-Z]/g, char => `-${char.toLowerCase()}`)
     }
 
     /** Sin `:host*` devuelve el selector tal cual (una sola variante); `:host-context` produce dos. */
