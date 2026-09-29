@@ -23,6 +23,6 @@ export class StyleInjector {
   }
 
   private static withoutStyleUrl(code: string): string {
-    return code.replace(new RegExp(`${CodeReader.styleRegExp.source},?`), "");
+    return CodeReader.replace(code, new RegExp(`${CodeReader.styleRegExp.source},?`), "");
   }
 }

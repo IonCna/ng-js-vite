@@ -12,7 +12,8 @@ export { TemplateFiles, type TemplateFilesOptions } from "@ng-js-vite/writing/te
  * ningún paquete externo por el tipo — cualquier consumidor con esa forma
  * (duck typing) lo puede usar tal cual, no hace falta importar nada de acá.
  *
- * Inlinea el template (escopeado) directo en el código; el CSS se inyecta al
+ * Inlinea el template (escopeado) directo en el código — también un `template`
+ * inline con `styleUrl`, que se reescribe con el scope de su CSS —; el CSS se inyecta al
  * `document.head` desde el propio módulo compilado, autocontenido (sin
  * dev-server sirviendo `/templates/...`). Para templates en archivos aparte
  * (`templates/`), ver `TemplateFiles`.
@@ -25,8 +26,9 @@ export const templateTransform = {
     const fileReader = FileReader.parse(reader, path);
     const patched = await TemplatePatcher.from(fileReader);
 
-    const result = code.replace(
-      CodeReader.templateRegExp,
+    const result = CodeReader.replace(
+      code,
+      reader.templateDeclaration,
       `template: ${JSON.stringify(patched.template.toString("utf8"))}`,
     );
 

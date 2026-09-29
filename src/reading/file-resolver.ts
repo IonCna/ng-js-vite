@@ -18,11 +18,18 @@ export class FileReader {
     private _style?: Buffer
 
     private constructor(
+        /** El `.html` del `templateUrl`; con template inline, el propio componente (de ahí sale el scope). */
         public readonly templatePath: string,
         public readonly stylePath?: string,
         /** El `selector` del componente — a qué se traduce `:host` en su CSS (`TemplatePatcher`). */
         public readonly hostSelector?: string,
+        /** El `template` inline del componente (sin `templateUrl`): no se lee de disco. */
+        public readonly inlineTemplate?: Buffer,
     ) {}
+
+    public get inline(): boolean {
+        return this.inlineTemplate !== undefined
+    }
 
     public async read(options: FileReaderReadOptions = { }) {
         if(this._template && !options.preventCache) return {
@@ -30,13 +37,15 @@ export class FileReader {
             style: this._style
         }
 
+        const readTemplate = () => this.inlineTemplate ?? readFile(this.templatePath)
+
         if(!this.stylePath) {
-            this._template = await readFile(this.templatePath)
+            this._template = await readTemplate()
             return { template: this._template }
         }
 
         const [template, style] = await Promise.all([
-            readFile(this.templatePath),
+            readTemplate(),
             readFile(this.stylePath),
         ])
 
@@ -55,7 +64,13 @@ export class FileReader {
     }
 
     static parse(reader: CodeReader, id: string) {
-        const templateLocation = FileReader._resolve(reader.templateUrl, id)
+        if(reader.inlineTemplate !== undefined) {
+            const [componentPath = id] = id.split("?")
+            const styleLocation = reader.styleUrl ? FileReader._resolve(reader.styleUrl, id) : undefined
+            return new FileReader(path.resolve(componentPath), styleLocation, reader.selector, Buffer.from(reader.inlineTemplate, "utf-8"))
+        }
+
+        const templateLocation = FileReader._resolve(reader.templateUrl!, id)
 
         if(reader.styleUrl) {
             const styleLocation = FileReader._resolve(reader.styleUrl, id)
@@ -79,7 +94,8 @@ export class FileReader {
         const isCandidate = candidates.test(cleanId)
 
         if(!isCandidate) return false
-        return CodeReader.templateRegExp.test(content)
+        if (!content.includes("templateUrl") && !content.includes("styleUrl")) return false
+        return CodeReader.templateRegExp.test(CodeReader.withoutComments(content)) || CodeReader.hasInlineTemplateWithStyle(content)
     }
 
     private static _resolve(templateUrl: string, id: string) {

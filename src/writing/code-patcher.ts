@@ -18,6 +18,6 @@ export class CodePatcher {
             ? path.basename(hashed.templateUrl)
             : path.basename(fileReader.templatePath)
         const publicUrl = `${FileReader.base}templates/${templateName}`
-        return params.code.replace(reader.templateUrl, publicUrl)
+        return CodeReader.replace(params.code, CodeReader.templateRegExp, `templateUrl: ${JSON.stringify(publicUrl)}`)
     }
 }

@@ -45,6 +45,28 @@ describe("templateTransform (esbuild)", () => {
         expect(result).toContain("template:")
         expect(result).not.toContain("document.head.appendChild")
     })
+
+    test("template inline + styleUrl: escopea el template en el código e inyecta el CSS", async () => {
+        writeFileSync(path.join(dir, "alert.css"), ":host { display: block; } .close { color: red; }")
+
+        const code = "@Component({ selector: \"ngb-alert\", styleUrl: \"./alert.css\", template: `<ng-content></ng-content>\n<button class=\"close\" ng-click=\"$.close()\">x</button>` }) class Alert {}"
+        const result = await templateTransform.transform(code, path.join(dir, "alert.ts"))
+
+        expect(result).toBeDefined()
+        expect(result).not.toContain("styleUrl")
+        expect(result).not.toContain("`")
+        const scope = result!.match(/_content-[0-9a-f]{8}/)![0]
+        expect(result).toContain(`<button class=\\"close\\" ng-click=\\"$.close()\\" ${scope}=\\"\\">`)
+        expect(result).toContain("<ng-content")
+        expect(result).toContain("ngb-alert{display:block}")
+        expect(result).toContain(`.close[${scope}]`)
+        expect(result).toContain("document.head.appendChild(s)")
+    })
+
+    test("template inline sin styleUrl: no se toca", async () => {
+        const code = "@Component({ selector: \"app-x\", template: `<p>x</p>` }) class X {}"
+        expect(await templateTransform.transform(code, path.join(dir, "x.ts"))).toBeUndefined()
+    })
 })
 
 describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
@@ -59,6 +81,24 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
     })
 
     const card = `@Component({ selector: "app-card", templateUrl: "./card.html", styleUrl: "./card.css" }) class Card {}`
+
+    test("template inline + styleUrl: el template queda en el código, el CSS sale en styles/ con su <link>", async () => {
+        writeFileSync(path.join(dir, "alert.css"), ":host { display: block; }")
+        const files = TemplateFiles.create()
+        const code = "@Component({ selector: \"ngb-alert\", styleUrl: \"./alert.css\", template: '<p>hola</p>' }) class Alert {}"
+
+        const result = await files.transform(code, path.join(dir, "alert.ts"))
+        expect(result).not.toContain("templateUrl")
+        expect(result).toMatch(/template: "<p _content-[0-9a-f]{8}=\\"\\">hola<\/p>"/)
+        const href = result?.match(/var h = "([^"]+)"/)?.[1]
+        expect(href).toMatch(/^\/styles\/alert-[0-9a-f]{8}\.css$/)
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        expect(readdirSync(out)).toEqual(["styles"])
+        expect(readFileSync(path.join(out, href!), "utf8")).toBe("ngb-alert{display:block}")
+        expect(files.ownersOf(path.join(dir, "alert.css"))).toEqual([path.join(dir, "alert.ts")])
+    })
 
     test("reescribe templateUrl a la URL pública con hash y emite el template escopeado en templates/", async () => {
         writeFileSync(path.join(dir, "card.html"), "<div class='card'></div>")

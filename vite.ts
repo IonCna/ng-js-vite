@@ -29,6 +29,13 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
         ...params
     }
 
+    /** El CSS escopeado como módulo virtual: Vite lo mete en su hoja de estilos. */
+    const withStyleImport = (code: string, scope: string, style: Buffer) => {
+        const virtualId = `${VIRTUAL_PREFIX}${scope}.css`
+        styles.set(virtualId, style.toString("utf-8"))
+        return `import ${JSON.stringify(virtualId)};\n${code}`
+    }
+
     return {
         name: 'ngJsTemplateParser',
 
@@ -44,6 +51,19 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
 
             const source = await TemplatePatcher.from(fileReader)
 
+            if (fileReader.inline) {
+                // `template` inline + `styleUrl`: el template queda en el código (escopeado), no se publica.
+                const inlined = CodeReader.replace(
+                    code,
+                    reader.templateDeclaration,
+                    `template: ${JSON.stringify(source.template.toString("utf-8"))}`,
+                )
+                return {
+                    code: source.style ? withStyleImport(inlined, source.scope, source.style) : inlined,
+                    map: null,
+                }
+            }
+
             const hashed = reader.hash(source.template.toString("utf-8"))
 
             templates.set(fileReader.templatePath, { reader, fileReader, hashed })
@@ -53,11 +73,7 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
                 hashed: options.hashed,
             }, reader, fileReader, hashed)
 
-            if (source.style) {
-                const virtualId = `${VIRTUAL_PREFIX}${source.scope}.css`
-                styles.set(virtualId, source.style.toString("utf-8"))
-                transformedCode = `import ${JSON.stringify(virtualId)};\n${transformedCode}`
-            }
+            if (source.style) transformedCode = withStyleImport(transformedCode, source.scope, source.style)
 
             return {
                 code: transformedCode,

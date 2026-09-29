@@ -12,6 +12,41 @@ describe("CodeReader", () => {
         expect(withoutStyle.styleUrl).toBeUndefined()
     })
 
+    test("reads an inline template (quotes or backticks) only alongside styleUrl", () => {
+        const backticks = CodeReader.from("{ styleUrl: './a.css', template: `<p class=\"x\">\\u00e1</p>\n<i>$ 1</i>` }")
+        const quoted = CodeReader.from(`{ template: '<p>it\\'s</p>', styleUrl: "./a.css" }`)
+
+        expect(backticks.templateUrl).toBeUndefined()
+        expect(backticks.inlineTemplate).toBe(`<p class="x">\u00e1</p>\n<i>$ 1</i>`)
+        expect(quoted.inlineTemplate).toBe("<p>it's</p>")
+        expect(CodeReader.hasInlineTemplateWithStyle("{ template: `<p></p>` }")).toBeFalse()
+        expect(CodeReader.hasInlineTemplateWithStyle("{ styleUrl: './a.css', template: `<p>${x}</p>` }")).toBeFalse()
+    })
+
+    test("ignores templateUrl/styleUrl quoted inside comments", () => {
+        const code = [
+            "/** upstream: `styleUrl: './day.scss'` */",
+            "// templateUrl: './old.html'",
+            "const url = 'http://x' // styleUrl: './nope.css'",
+            "const t = `a // b ${ { k: 1 }.k } /* c */`",
+            "@Component({ selector: 'x', template: `<p></p>` }) class X {}",
+        ].join("\n")
+
+        expect(CodeReader.withoutComments(code)).toHaveLength(code.length)
+        expect(CodeReader.withoutComments(code)).toContain("const url = 'http://x'")
+        expect(CodeReader.withoutComments(code)).toContain("`a // b ${ { k: 1 }.k } /* c */`")
+        expect(CodeReader.withoutComments(code)).not.toContain("styleUrl")
+        expect(CodeReader.hasInlineTemplateWithStyle(code)).toBeFalse()
+        expect(() => CodeReader.from(code)).toThrow("content must have templateUrl")
+    })
+
+    test("replace skips commented matches and does not expand $ patterns", () => {
+        const code = `// templateUrl: "./a.html"\n{ templateUrl: "./b.html" }`
+        const replaced = CodeReader.replace(code, CodeReader.templateRegExp, `template: "$& $1"`)
+
+        expect(replaced).toBe(`// templateUrl: "./a.html"\n{ template: "$& $1" }`)
+    })
+
     test("rejects missing or non-literal templateUrl declarations", () => {
         expect(() => CodeReader.from("const value = 1")).toThrow("content must have templateUrl")
         expect(() => CodeReader.from("{ templateUrl: variable }")).toThrow("templateUrl must be defined")

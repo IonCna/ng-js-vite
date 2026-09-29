@@ -118,6 +118,7 @@ export class TemplateFiles {
     const reader = CodeReader.from(code);
     const fileReader = FileReader.parse(reader, filePath);
     const patched = await TemplatePatcher.from(fileReader, { preventCache: true });
+    if (fileReader.inline) return this.inlineTransform(code, reader, fileReader, patched);
 
     const templateName = this.templateName(reader, fileReader, patched.template);
     this.templates.register(templateName, fileReader);
@@ -126,12 +127,27 @@ export class TemplateFiles {
     // El compilador decide `transclude: true` viendo `<ng-content>` en el template; con `templateUrl` no lo ve, así
     // que se le avisa con `ɵngContent` (sin eso AngularJS tira el contenido proyectado del componente).
     const projectsContent = /<ng-content[\s>/]/.test(patched.template.toString("utf-8"));
-    const rewritten = code.replace(
+    const rewritten = CodeReader.replace(
+      code,
       CodeReader.templateRegExp,
       `templateUrl: ${JSON.stringify(this.url(this.templates, templateName))}${projectsContent ? ", ɵngContent: true" : ""}`,
     );
     if (!patched.style || !fileReader.stylePath) return rewritten;
 
+    const styleName = this.styleName(fileReader.stylePath, patched.style, patched.scope);
+    this.styles.register(styleName, fileReader);
+    return StyleInjector.link(rewritten, this.url(this.styles, styleName));
+  }
+
+  /**
+   * `template` inline + `styleUrl`: el template no se publica (queda en el código, escopeado); solo el CSS va a
+   * `styles/` con su `<link>`, igual que con `templateUrl`.
+   */
+  private inlineTransform(code: string, reader: CodeReader, fileReader: FileReader, patched: TemplatePatcher): string {
+    const rewritten = CodeReader.replace(code, reader.templateDeclaration, `template: ${JSON.stringify(patched.template.toString("utf-8"))}`);
+    if (!patched.style || !fileReader.stylePath) return rewritten;
+
+    this.addOwner(fileReader.stylePath, fileReader.templatePath);
     const styleName = this.styleName(fileReader.stylePath, patched.style, patched.scope);
     this.styles.register(styleName, fileReader);
     return StyleInjector.link(rewritten, this.url(this.styles, styleName));

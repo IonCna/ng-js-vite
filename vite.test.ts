@@ -77,6 +77,16 @@ describe("ngJsTemplateParser transform", () => {
         expect(result?.code).toContain(`styleUrl: "./app-root.css"`)
     })
 
+    test("inline template + styleUrl: scopes the template in place and imports the scoped styles", async () => {
+        const plugin = ngJsTemplateParser()
+        const inline = "@Component({ selector: \"app-root\", styleUrl: \"./app-root.css\", template: `<h1 class=\"title\">hi</h1>` }) class AppRoot {}"
+        const result = await callTransform(plugin, {}, inline, componentPath)
+
+        expect(result?.code).toMatch(/template: "<h1 class=\\"title\\" _content-[0-9a-f]{8}=\\"\\">hi<\/h1>"/)
+        expect(result?.code).not.toContain("templateUrl")
+        expect(callLoad(plugin, styleImportId(result?.code))).toMatch(/\.title\[_content-[0-9a-f]{8}\]/)
+    })
+
     test("leaves code untouched when there is no templateUrl or styleUrl", async () => {
         const plugin = ngJsTemplateParser()
         const result = await callTransform(plugin, {}, "const x = 1", componentPath)
