@@ -1,9 +1,11 @@
 import { CodeReader } from "@ng-js-vite/reading/code-reader.ts";
 import { FileReader } from "@ng-js-vite/reading/file-resolver.ts";
+import { MappedCode, type MappedOutput } from "@ng-js-vite/writing/mapped-code.ts";
 import { StyleInjector } from "@ng-js-vite/writing/style-injector.ts";
 import { TemplatePatcher } from "@ng-js-vite/writing/template-patcher.ts";
 
 export { TemplateFiles, type TemplateFilesOptions } from "@ng-js-vite/writing/template-files.ts";
+export type { MappedOutput, SourceMapV3 } from "@ng-js-vite/writing/mapped-code.ts";
 
 /**
  * Implementación esbuild del scoping de template/CSS — mismo mecanismo que
@@ -19,19 +21,18 @@ export { TemplateFiles, type TemplateFilesOptions } from "@ng-js-vite/writing/te
  * (`templates/`), ver `TemplateFiles`.
  */
 export const templateTransform = {
-  async transform(code: string, path: string): Promise<string | undefined> {
+  async transform(code: string, path: string): Promise<MappedOutput | undefined> {
     if (!FileReader.validate(path, code)) return undefined;
 
     const reader = CodeReader.from(code);
     const fileReader = FileReader.parse(reader, path);
     const patched = await TemplatePatcher.from(fileReader);
 
-    const result = CodeReader.replace(
-      code,
+    const result = MappedCode.from(code, path).replace(
       reader.templateDeclaration,
       `template: ${JSON.stringify(patched.template.toString("utf8"))}`,
     );
 
-    return StyleInjector.apply(result, patched.style);
+    return StyleInjector.apply(result, patched.style).output();
   },
 };

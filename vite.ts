@@ -4,6 +4,7 @@ import {FileReader} from "@ng-js-vite/reading/file-resolver.ts";
 import {type CodeHashResult, CodeReader} from "@ng-js-vite/reading/code-reader.ts";
 import {CodePatcher} from "@ng-js-vite/writing/code-patcher.ts";
 import {TemplatePatcher} from "@ng-js-vite/writing/template-patcher.ts";
+import {MappedCode} from "@ng-js-vite/writing/mapped-code.ts";
 
 type NgJsTemplateParserOptions = {
     hashed?: boolean;
@@ -30,10 +31,10 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
     }
 
     /** El CSS escopeado como módulo virtual: Vite lo mete en su hoja de estilos. */
-    const withStyleImport = (code: string, scope: string, style: Buffer) => {
+    const withStyleImport = (code: MappedCode, scope: string, style: Buffer) => {
         const virtualId = `${VIRTUAL_PREFIX}${scope}.css`
         styles.set(virtualId, style.toString("utf-8"))
-        return `import ${JSON.stringify(virtualId)};\n${code}`
+        return code.prepend(`import ${JSON.stringify(virtualId)};\n`)
     }
 
     return {
@@ -53,32 +54,22 @@ export function ngJsTemplateParser(params?: NgJsTemplateParserOptions): Plugin {
 
             if (fileReader.inline) {
                 // `template` inline + `styleUrl`: el template queda en el código (escopeado), no se publica.
-                const inlined = CodeReader.replace(
-                    code,
+                const inlined = MappedCode.from(code, id).replace(
                     reader.templateDeclaration,
                     `template: ${JSON.stringify(source.template.toString("utf-8"))}`,
                 )
-                return {
-                    code: source.style ? withStyleImport(inlined, source.scope, source.style) : inlined,
-                    map: null,
-                }
+                return (source.style ? withStyleImport(inlined, source.scope, source.style) : inlined).output()
             }
 
             const hashed = reader.hash(source.template.toString("utf-8"))
 
             templates.set(fileReader.templatePath, { reader, fileReader, hashed })
 
-            let transformedCode = CodePatcher.from({
-                code,
-                hashed: options.hashed,
-            }, reader, fileReader, hashed)
+            const publicUrl = CodePatcher.url({ hashed: options.hashed }, fileReader, hashed)
+            const transformed = MappedCode.from(code, id)
+                .replace(CodeReader.templateRegExp, `templateUrl: ${JSON.stringify(publicUrl)}`)
 
-            if (source.style) transformedCode = withStyleImport(transformedCode, source.scope, source.style)
-
-            return {
-                code: transformedCode,
-                map: null,
-            }
+            return (source.style ? withStyleImport(transformed, source.scope, source.style) : transformed).output()
         },
 
         resolveId(id) {

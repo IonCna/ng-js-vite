@@ -14,10 +14,15 @@ export class CodePatcher {
         fileReader: FileReader,
         hashed: CodeHashResult,
     ): string {
+        const publicUrl = CodePatcher.url(params, fileReader, hashed)
+        return CodeReader.replace(params.code, CodeReader.templateRegExp, `templateUrl: ${JSON.stringify(publicUrl)}`)
+    }
+
+    /** La URL pública del template (`<base>templates/<nombre>`), con o sin hash. */
+    public static url(params: Pick<CodePatcherParams, "hashed">, fileReader: FileReader, hashed: CodeHashResult): string {
         const templateName = params.hashed
             ? path.basename(hashed.templateUrl)
             : path.basename(fileReader.templatePath)
-        const publicUrl = `${FileReader.base}templates/${templateName}`
-        return CodeReader.replace(params.code, CodeReader.templateRegExp, `templateUrl: ${JSON.stringify(publicUrl)}`)
+        return `${FileReader.base}templates/${templateName}`
     }
 }

@@ -30,6 +30,7 @@
     "styleUrl"
   ],
   "devDependencies": {
+    "@jridgewell/trace-mapping": "^0.3.31",
     "@types/bun": "latest",
     "@types/css-tree": "^3.2.0",
     "tsup": "^8.5.1"
@@ -45,6 +46,7 @@
   },
   "dependencies": {
     "css-tree": "^3.2.1",
+    "magic-string": "^1.4.2",
     "parse5": "^8.0.1"
   }
 }

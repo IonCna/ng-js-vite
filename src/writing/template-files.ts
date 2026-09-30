@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { CodeReader } from "@ng-js-vite/reading/code-reader.ts";
 import { FileReader } from "@ng-js-vite/reading/file-resolver.ts";
+import { MappedCode, type MappedOutput } from "@ng-js-vite/writing/mapped-code.ts";
 import { StyleInjector } from "@ng-js-vite/writing/style-injector.ts";
 import { TemplatePatcher } from "@ng-js-vite/writing/template-patcher.ts";
 
@@ -16,7 +17,11 @@ type OutgoingResponse = {
 export type TemplateFilesOptions = {
   /** `true` (build): `nombre-<hash>.ext`, cacheable para siempre. `false` (dev): nombre fijo, se relee en cada request. */
   hashed?: boolean;
-  /** Prefijo público de las URLs (`<base href>` de la app). */
+  /**
+   * Prefijo de las URLs publicadas. Por defecto ninguno: `templates/…`/`styles/…` relativas, que el navegador resuelve
+   * contra el `<base href>` de la app (como los scripts de Angular) — la misma build sirve en `/` o en un subpath
+   * (GitHub Pages). Un prefijo absoluto (`/app/`) las fija.
+   */
   base?: string;
 };
 
@@ -27,9 +32,14 @@ type PublishedPart = "template" | "style";
  * Un directorio publicado (`templates/`, `styles/`): nombre publicado → componente fuente. El contenido se relee y
  * escopea al emitir/servir (`TemplatePatcher`), nunca se guarda — así en dev un cambio al `.html`/`.css` se ve al
  * recargar.
+ *
+ * Cada nombre sabe qué componentes (`.ts`) lo publican: dos pueden compartir un template. Un componente que se
+ * vuelve a transformar suelta lo suyo (`release`) y el nombre se va cuando ya nadie lo usa — sin eso, un
+ * `templateUrl` que pasó a `template` inline (y su `.html` borrado) seguía en el registro y `emit` fallaba con ENOENT.
  */
 class PublishedDir {
   private readonly sources = new Map<string, FileReader>();
+  private readonly users = new Map<string, Set<string>>();
 
   constructor(
     readonly dir: string,
@@ -38,7 +48,7 @@ class PublishedDir {
   ) {}
 
   /** Sin hash dos archivos con el mismo nombre chocarían: error claro en vez de pisarse. */
-  register(fileName: string, fileReader: FileReader): void {
+  register(fileName: string, fileReader: FileReader, component: string): void {
     const existing = this.sources.get(fileName);
     if (existing && this.sourcePath(existing) !== this.sourcePath(fileReader)) {
       throw new Error(
@@ -46,6 +56,23 @@ class PublishedDir {
       );
     }
     this.sources.set(fileName, fileReader);
+    let users = this.users.get(fileName);
+    if (!users) this.users.set(fileName, (users = new Set()));
+    users.add(component);
+  }
+
+  /** Lo que publicaba `component`: cada nombre sin otro componente que lo use sale del registro. */
+  release(component: string): void {
+    for (const [fileName, users] of this.users) {
+      if (!users.delete(component) || users.size) continue;
+      this.users.delete(fileName);
+      this.sources.delete(fileName);
+    }
+  }
+
+  clear(): void {
+    this.sources.clear();
+    this.users.clear();
   }
 
   async emit(outDir: string): Promise<void> {
@@ -104,52 +131,53 @@ export class TemplateFiles {
 
   private constructor(options: TemplateFilesOptions) {
     this.hashed = options.hashed ?? true;
-    const base = options.base ?? "/";
-    this.base = base.endsWith("/") ? base : `${base}/`;
+    const base = options.base ?? "";
+    this.base = base === "" || base.endsWith("/") ? base : `${base}/`;
   }
 
   static create(options: TemplateFilesOptions = {}): TemplateFiles {
     return new TemplateFiles(options);
   }
 
-  async transform(code: string, filePath: string): Promise<string | undefined> {
+  async transform(code: string, filePath: string): Promise<MappedOutput | undefined> {
+    // Antes de validar: un componente que ya no publica nada (pasó a `template` inline sin `styleUrl`) suelta lo de antes.
+    this.release(filePath);
     if (!FileReader.validate(filePath, code)) return undefined;
 
     const reader = CodeReader.from(code);
     const fileReader = FileReader.parse(reader, filePath);
     const patched = await TemplatePatcher.from(fileReader, { preventCache: true });
-    if (fileReader.inline) return this.inlineTransform(code, reader, fileReader, patched);
+    if (fileReader.inline) return this.inlineTransform(MappedCode.from(code, filePath), reader, fileReader, patched, filePath).output();
 
     const templateName = this.templateName(reader, fileReader, patched.template);
-    this.templates.register(templateName, fileReader);
+    this.templates.register(templateName, fileReader, path.resolve(filePath));
     this.addOwner(fileReader.templatePath, filePath);
     if (fileReader.stylePath) this.addOwner(fileReader.stylePath, filePath);
     // El compilador decide `transclude: true` viendo `<ng-content>` en el template; con `templateUrl` no lo ve, así
     // que se le avisa con `ɵngContent` (sin eso AngularJS tira el contenido proyectado del componente).
     const projectsContent = /<ng-content[\s>/]/.test(patched.template.toString("utf-8"));
-    const rewritten = CodeReader.replace(
-      code,
+    const rewritten = MappedCode.from(code, filePath).replace(
       CodeReader.templateRegExp,
       `templateUrl: ${JSON.stringify(this.url(this.templates, templateName))}${projectsContent ? ", ɵngContent: true" : ""}`,
     );
-    if (!patched.style || !fileReader.stylePath) return rewritten;
+    if (!patched.style || !fileReader.stylePath) return rewritten.output();
 
     const styleName = this.styleName(fileReader.stylePath, patched.style, patched.scope);
-    this.styles.register(styleName, fileReader);
-    return StyleInjector.link(rewritten, this.url(this.styles, styleName));
+    this.styles.register(styleName, fileReader, path.resolve(filePath));
+    return StyleInjector.link(rewritten, this.url(this.styles, styleName)).output();
   }
 
   /**
    * `template` inline + `styleUrl`: el template no se publica (queda en el código, escopeado); solo el CSS va a
    * `styles/` con su `<link>`, igual que con `templateUrl`.
    */
-  private inlineTransform(code: string, reader: CodeReader, fileReader: FileReader, patched: TemplatePatcher): string {
-    const rewritten = CodeReader.replace(code, reader.templateDeclaration, `template: ${JSON.stringify(patched.template.toString("utf-8"))}`);
+  private inlineTransform(code: MappedCode, reader: CodeReader, fileReader: FileReader, patched: TemplatePatcher, filePath: string): MappedCode {
+    const rewritten = code.replace(reader.templateDeclaration, `template: ${JSON.stringify(patched.template.toString("utf-8"))}`);
     if (!patched.style || !fileReader.stylePath) return rewritten;
 
     this.addOwner(fileReader.stylePath, fileReader.templatePath);
     const styleName = this.styleName(fileReader.stylePath, patched.style, patched.scope);
-    this.styles.register(styleName, fileReader);
+    this.styles.register(styleName, fileReader, path.resolve(filePath));
     return StyleInjector.link(rewritten, this.url(this.styles, styleName));
   }
 
@@ -160,6 +188,27 @@ export class TemplateFiles {
    */
   ownersOf(file: string): string[] {
     return [...(this.owners.get(path.resolve(file)) ?? [])];
+  }
+
+  /**
+   * Empezar una compilación nueva (`ngjs build --watch`): un componente borrado del proyecto no se vuelve a
+   * transformar, así que no soltaría lo suyo — el registro se rearma con lo que transforme esta compilación.
+   */
+  reset(): void {
+    this.templates.clear();
+    this.styles.clear();
+    this.owners.clear();
+  }
+
+  /** Lo que publicaba `component` (y su lugar como dueño de un `.html`/`.css`) antes de volver a transformarlo. */
+  private release(component: string): void {
+    const key = path.resolve(component);
+    this.templates.release(key);
+    this.styles.release(key);
+    for (const [source, components] of this.owners) {
+      components.delete(key);
+      if (!components.size) this.owners.delete(source);
+    }
   }
 
   private addOwner(source: string, component: string): void {
@@ -175,13 +224,21 @@ export class TemplateFiles {
     await this.styles.emit(outDir);
   }
 
-  /** Middleware connect (Vite `server.middlewares`): sirve `/templates/<nombre>` y `/styles/<nombre>` releyendo el fuente. */
+  /**
+   * Middleware connect (Vite `server.middlewares`): sirve `…/templates/<nombre>` y `…/styles/<nombre>` releyendo el
+   * fuente. Con URLs relativas el pedido llega con el `<base href>` de la página adelante (`/docs/templates/x.html`):
+   * cuenta el último segmento; con un `base` absoluto, solo bajo ese prefijo.
+   */
   middleware() {
     return (req: IncomingRequest, res: OutgoingResponse, next: (error?: unknown) => void): void => {
       const pathname = new URL(req.url ?? "/", "http://ng-js-vite.local").pathname;
       for (const dir of [this.templates, this.styles]) {
-        const prefix = `${this.base}${dir.dir}/`;
-        if (pathname.startsWith(prefix) && dir.serve(pathname.slice(prefix.length), res, next)) return;
+        const marker = `/${dir.dir}/`;
+        const at = pathname.lastIndexOf(marker);
+        if (at === -1) continue;
+        if (this.base.startsWith("/") && !pathname.startsWith(`${this.base}${dir.dir}/`)) continue;
+        const fileName = pathname.slice(at + marker.length);
+        if (fileName && !fileName.includes("/") && dir.serve(fileName, res, next)) return;
       }
       next();
     };

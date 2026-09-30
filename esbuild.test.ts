@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { originalPositionFor, TraceMap } from "@jridgewell/trace-mapping"
 import { TemplateFiles, templateTransform } from "./esbuild.ts"
 
 describe("templateTransform (esbuild)", () => {
@@ -16,7 +17,7 @@ describe("templateTransform (esbuild)", () => {
     })
 
     test("returns undefined if the file has no templateUrl", async () => {
-        const result = await templateTransform.transform("class Foo {}", path.join(dir, "foo.ts"))
+        const result = (await templateTransform.transform("class Foo {}", path.join(dir, "foo.ts")))?.code
         expect(result).toBeUndefined()
     })
 
@@ -25,7 +26,7 @@ describe("templateTransform (esbuild)", () => {
         writeFileSync(path.join(dir, "card.css"), ".card { color: red; }")
 
         const code = `@Component({ selector: "app-card", templateUrl: "./card.html", styleUrl: "./card.css" }) class Card {}`
-        const result = await templateTransform.transform(code, path.join(dir, "card.ts"))
+        const result = (await templateTransform.transform(code, path.join(dir, "card.ts")))?.code
 
         expect(result).toBeDefined()
         expect(result).toContain("template:")
@@ -39,18 +40,45 @@ describe("templateTransform (esbuild)", () => {
         writeFileSync(path.join(dir, "card.html"), "<div class='card'></div>")
 
         const code = `@Component({ selector: "app-card", templateUrl: "./card.html" }) class Card {}`
-        const result = await templateTransform.transform(code, path.join(dir, "card.ts"))
+        const result = (await templateTransform.transform(code, path.join(dir, "card.ts")))?.code
 
         expect(result).toBeDefined()
         expect(result).toContain("template:")
         expect(result).not.toContain("document.head.appendChild")
     })
 
+    test("devuelve el source map al .ts: el template inline de varias líneas pasa a una, el resto no se corre", async () => {
+        writeFileSync(path.join(dir, "alert.css"), ".close { color: red; }")
+        const file = path.join(dir, "alert.ts")
+        const code = [
+            "@Component({",
+            "    selector: \"ngb-alert\",",
+            "    styleUrl: \"./alert.css\",",
+            "    template: `",
+            "        <p>uno</p>",
+            "        <p>dos</p>",
+            "    `,",
+            "})",
+            "class Alert {",
+            "    close() { throw new Error(\"boom\") }",
+            "}",
+        ].join("\n")
+
+        const output = (await templateTransform.transform(code, file))!
+        const lines = output.code.split("\n")
+        const line = lines.findIndex((text) => text.includes("boom")) + 1
+        const column = lines[line - 1]!.indexOf("boom")
+        expect(line).not.toBe(10)
+        const source = file.split(path.sep).join("/")
+        expect(output.map.sources).toEqual([source])
+        expect(originalPositionFor(new TraceMap(output.map as never), { line, column })).toMatchObject({ source, line: 10 })
+    })
+
     test("template inline + styleUrl: escopea el template en el código e inyecta el CSS", async () => {
         writeFileSync(path.join(dir, "alert.css"), ":host { display: block; } .close { color: red; }")
 
         const code = "@Component({ selector: \"ngb-alert\", styleUrl: \"./alert.css\", template: `<ng-content></ng-content>\n<button class=\"close\" ng-click=\"$.close()\">x</button>` }) class Alert {}"
-        const result = await templateTransform.transform(code, path.join(dir, "alert.ts"))
+        const result = (await templateTransform.transform(code, path.join(dir, "alert.ts")))?.code
 
         expect(result).toBeDefined()
         expect(result).not.toContain("styleUrl")
@@ -65,7 +93,7 @@ describe("templateTransform (esbuild)", () => {
 
     test("template inline sin styleUrl: no se toca", async () => {
         const code = "@Component({ selector: \"app-x\", template: `<p>x</p>` }) class X {}"
-        expect(await templateTransform.transform(code, path.join(dir, "x.ts"))).toBeUndefined()
+        expect((await templateTransform.transform(code, path.join(dir, "x.ts")))?.code).toBeUndefined()
     })
 })
 
@@ -87,11 +115,11 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         const files = TemplateFiles.create()
         const code = "@Component({ selector: \"ngb-alert\", styleUrl: \"./alert.css\", template: '<p>hola</p>' }) class Alert {}"
 
-        const result = await files.transform(code, path.join(dir, "alert.ts"))
+        const result = (await files.transform(code, path.join(dir, "alert.ts")))?.code
         expect(result).not.toContain("templateUrl")
         expect(result).toMatch(/template: "<p _content-[0-9a-f]{8}=\\"\\">hola<\/p>"/)
         const href = result?.match(/var h = "([^"]+)"/)?.[1]
-        expect(href).toMatch(/^\/styles\/alert-[0-9a-f]{8}\.css$/)
+        expect(href).toMatch(/^styles\/alert-[0-9a-f]{8}\.css$/)
 
         const out = path.join(dir, "dist")
         await files.emit(out)
@@ -105,14 +133,14 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         writeFileSync(path.join(dir, "card.css"), ".card { color: red; }")
         const files = TemplateFiles.create()
 
-        const result = await files.transform(card, path.join(dir, "card.ts"))
+        const result = (await files.transform(card, path.join(dir, "card.ts")))?.code
         const url = result?.match(/templateUrl: "([^"]+)"/)?.[1]
-        expect(url).toMatch(/^\/templates\/card-[0-9a-f]{8}\.html$/)
+        expect(url).toMatch(/^templates\/card-[0-9a-f]{8}\.html$/)
 
         const out = path.join(dir, "dist")
         await files.emit(out)
         const [emitted] = readdirSync(path.join(out, "templates"))
-        expect(`/templates/${emitted}`).toBe(url!)
+        expect(`templates/${emitted}`).toBe(url!)
         expect(readFileSync(path.join(out, "templates", emitted!), "utf8")).toMatch(/class="card" _content-[0-9a-f]{8}=""/)
     })
 
@@ -121,9 +149,9 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         writeFileSync(path.join(dir, "card.css"), ".card { color: red; }")
         const files = TemplateFiles.create()
 
-        const result = (await files.transform(card, path.join(dir, "card.ts")))!
+        const result = (await files.transform(card, path.join(dir, "card.ts")))!.code
         const href = result.match(/var h = "([^"]+)"/)?.[1]
-        expect(href).toMatch(/^\/styles\/card-[0-9a-f]{8}\.css$/)
+        expect(href).toMatch(/^styles\/card-[0-9a-f]{8}\.css$/)
         expect(result).not.toContain("styleUrl")
         expect(result).not.toContain("textContent") // nada de <style> inline
         expect(result).toContain('l.rel = "stylesheet"')
@@ -132,7 +160,7 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         const out = path.join(dir, "dist")
         await files.emit(out)
         const [emitted] = readdirSync(path.join(out, "styles"))
-        expect(`/styles/${emitted}`).toBe(href!)
+        expect(`styles/${emitted}`).toBe(href!)
         expect(readFileSync(path.join(out, "styles", emitted!), "utf8")).toMatch(/\.card\[_content-[0-9a-f]{8}\]/)
     })
 
@@ -140,9 +168,9 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         writeFileSync(path.join(dir, "panel.html"), "<section><ng-content></ng-content></section>")
         writeFileSync(path.join(dir, "card.html"), "<p>ng-content no es un tag acá</p>")
         const files = TemplateFiles.create({ hashed: false })
-        const panel = await files.transform(`@Component({ selector: "app-panel", templateUrl: "./panel.html" }) class Panel {}`, path.join(dir, "panel.ts"))
-        const card = await files.transform(`@Component({ selector: "app-card", templateUrl: "./card.html" }) class Card {}`, path.join(dir, "card.ts"))
-        expect(panel).toContain(`templateUrl: "/templates/panel.html", ɵngContent: true`)
+        const panel = (await files.transform(`@Component({ selector: "app-panel", templateUrl: "./panel.html" }) class Panel {}`, path.join(dir, "panel.ts")))?.code
+        const card = (await files.transform(`@Component({ selector: "app-card", templateUrl: "./card.html" }) class Card {}`, path.join(dir, "card.ts")))?.code
+        expect(panel).toContain(`templateUrl: "templates/panel.html", ɵngContent: true`)
         expect(card).not.toContain("ɵngContent")
     })
 
@@ -159,7 +187,7 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
     test("sin styleUrl no hay link ni carpeta styles/", async () => {
         writeFileSync(path.join(dir, "card.html"), "<div></div>")
         const files = TemplateFiles.create()
-        const result = await files.transform(`@Component({ selector: "app-card", templateUrl: "./card.html" }) class Card {}`, path.join(dir, "card.ts"))
+        const result = (await files.transform(`@Component({ selector: "app-card", templateUrl: "./card.html" }) class Card {}`, path.join(dir, "card.ts")))?.code
         expect(result).not.toContain("data-ngjs-style")
 
         const out = path.join(dir, "dist")
@@ -171,10 +199,10 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         writeFileSync(path.join(dir, "card.html"), "<p>v1</p>")
         writeFileSync(path.join(dir, "card.css"), "p { color: red; }")
         const files = TemplateFiles.create({ hashed: false })
-        const result = (await files.transform(card, path.join(dir, "card.ts")))!
-        expect(result).toContain(`templateUrl: "/templates/card.html"`)
+        const result = (await files.transform(card, path.join(dir, "card.ts")))!.code
+        expect(result).toContain(`templateUrl: "templates/card.html"`)
         const href = result.match(/var h = "([^"]+)"/)![1]!
-        expect(href).toMatch(/^\/styles\/card-[0-9a-f]{8}\.css$/)
+        expect(href).toMatch(/^styles\/card-[0-9a-f]{8}\.css$/)
 
         writeFileSync(path.join(dir, "card.html"), "<p>v2</p>")
         writeFileSync(path.join(dir, "card.css"), "p { color: blue; }")
@@ -183,6 +211,8 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
             files.middleware()({ url }, { statusCode: 0, setHeader: (_: string, value: string) => { type = value }, end: (body: Buffer) => resolve({ body: body.toString(), type }) }, reject)
         })
         expect((await request("/templates/card.html?x=1")).body).toContain("v2")
+        // URL relativa: la página la pide con su <base href> adelante (GitHub Pages en un subpath).
+        expect((await request("/ngb-js-docs/templates/card.html")).body).toContain("v2")
         const css = await request(href)
         expect(css.type).toContain("text/css")
         expect(css.body).toContain("blue")
@@ -201,8 +231,8 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         const shared = (sub: string) => `@Component({ selector: "app-${sub}", templateUrl: "./${sub}.html", styleUrl: "../shared.css" }) class C {}`
         for (const hashed of [true, false]) {
             const files = TemplateFiles.create({ hashed })
-            const a = (await files.transform(shared("a"), path.join(dir, "a", "a.ts")))!.match(/var h = "([^"]+)"/)![1]
-            const b = (await files.transform(shared("b"), path.join(dir, "b", "b.ts")))!.match(/var h = "([^"]+)"/)![1]
+            const a = (await files.transform(shared("a"), path.join(dir, "a", "a.ts")))!.code.match(/var h = "([^"]+)"/)![1]
+            const b = (await files.transform(shared("b"), path.join(dir, "b", "b.ts")))!.code.match(/var h = "([^"]+)"/)![1]
             expect(a).not.toBe(b)
         }
     })
@@ -217,4 +247,47 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         await files.transform(card, path.join(dir, "a", "card.ts"))
         await expect(files.transform(card, path.join(dir, "b", "card.ts"))).rejects.toThrow(/renombrá uno/)
     })
+
+    test("un componente que pasa de templateUrl a template inline (y borra su .html) suelta lo publicado", async () => {
+        writeFileSync(path.join(dir, "card.html"), "<p>card</p>")
+        const files = TemplateFiles.create()
+        const file = path.join(dir, "card.ts")
+        await files.transform(`@Component({ selector: "app-card", templateUrl: "./card.html" }) class Card {}`, file)
+
+        rmSync(path.join(dir, "card.html"))
+        await files.transform(`@Component({ selector: "app-card", template: "<p>card</p>" }) class Card {}`, file)
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        expect(existsSync(path.join(out, "templates"))).toBe(false)
+        expect(files.ownersOf(path.join(dir, "card.html"))).toEqual([])
+    })
+
+    test("un template compartido sigue publicado mientras otro componente lo use", async () => {
+        writeFileSync(path.join(dir, "shared.html"), "<p>shared</p>")
+        const files = TemplateFiles.create()
+        const component = (name: string) => `@Component({ selector: "app-${name}", templateUrl: "./shared.html" }) class C {}`
+        await files.transform(component("a"), path.join(dir, "a.ts"))
+        await files.transform(component("b"), path.join(dir, "b.ts"))
+
+        await files.transform(`@Component({ selector: "app-a", template: "" }) class C {}`, path.join(dir, "a.ts"))
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        expect(readdirSync(path.join(out, "templates"))).toHaveLength(1)
+    })
+
+    test("reset(): una compilación nueva no arrastra lo de un componente borrado", async () => {
+        writeFileSync(path.join(dir, "card.html"), "<p>card</p>")
+        const files = TemplateFiles.create()
+        await files.transform(card.replace(', styleUrl: "./card.css"', ""), path.join(dir, "card.ts"))
+
+        rmSync(path.join(dir, "card.html"))
+        files.reset()
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        expect(existsSync(path.join(out, "templates"))).toBe(false)
+    })
 })
+
