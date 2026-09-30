@@ -103,7 +103,7 @@ class PublishedDir {
 
   /** El CSS se escopea por template: mismo `.css` con otro template es otro archivo publicado. */
   private sourcePath(fileReader: FileReader): string | undefined {
-    return this.part === "template" ? fileReader.templatePath : `${fileReader.stylePath} (${fileReader.templatePath})`;
+    return this.part === "template" ? fileReader.templatePath : `${fileReader.stylePaths.join(", ") || "styles"} (${fileReader.templatePath})`;
   }
 }
 
@@ -152,7 +152,7 @@ export class TemplateFiles {
     const templateName = this.templateName(reader, fileReader, patched.template);
     this.templates.register(templateName, fileReader, path.resolve(filePath));
     this.addOwner(fileReader.templatePath, filePath);
-    if (fileReader.stylePath) this.addOwner(fileReader.stylePath, filePath);
+    for (const stylePath of fileReader.stylePaths) this.addOwner(stylePath, filePath);
     // El compilador decide `transclude: true` viendo `<ng-content>` en el template; con `templateUrl` no lo ve, así
     // que se le avisa con `ɵngContent` (sin eso AngularJS tira el contenido proyectado del componente).
     const projectsContent = /<ng-content[\s>/]/.test(patched.template.toString("utf-8"));
@@ -160,23 +160,23 @@ export class TemplateFiles {
       CodeReader.templateRegExp,
       `templateUrl: ${JSON.stringify(this.url(this.templates, templateName))}${projectsContent ? ", ɵngContent: true" : ""}`,
     );
-    if (!patched.style || !fileReader.stylePath) return rewritten.output();
+    if (!patched.style) return rewritten.output();
 
-    const styleName = this.styleName(fileReader.stylePath, patched.style, patched.scope);
+    const styleName = this.styleName(fileReader, patched.style, patched.scope);
     this.styles.register(styleName, fileReader, path.resolve(filePath));
     return StyleInjector.link(rewritten, this.url(this.styles, styleName)).output();
   }
 
   /**
-   * `template` inline + `styleUrl`: el template no se publica (queda en el código, escopeado); solo el CSS va a
+   * `template` inline + estilos: el template no se publica (queda en el código, escopeado); solo el CSS va a
    * `styles/` con su `<link>`, igual que con `templateUrl`.
    */
   private inlineTransform(code: MappedCode, reader: CodeReader, fileReader: FileReader, patched: TemplatePatcher, filePath: string): MappedCode {
     const rewritten = code.replace(reader.templateDeclaration, `template: ${JSON.stringify(patched.template.toString("utf-8"))}`);
-    if (!patched.style || !fileReader.stylePath) return rewritten;
+    if (!patched.style) return rewritten;
 
-    this.addOwner(fileReader.stylePath, fileReader.templatePath);
-    const styleName = this.styleName(fileReader.stylePath, patched.style, patched.scope);
+    for (const stylePath of fileReader.stylePaths) this.addOwner(stylePath, fileReader.templatePath);
+    const styleName = this.styleName(fileReader, patched.style, patched.scope);
     this.styles.register(styleName, fileReader, path.resolve(filePath));
     return StyleInjector.link(rewritten, this.url(this.styles, styleName));
   }
@@ -257,13 +257,14 @@ export class TemplateFiles {
   /**
    * `card.component.css` → `card.component-<hash>.css`: del contenido escopeado (build) o del scope (dev, estable
    * entre ediciones). Nunca el nombre pelado: un mismo `.css` compartido por dos componentes se escopea distinto
-   * para cada uno (el scope sale del template) y son dos archivos publicados.
+   * para cada uno (el scope sale del template) y son dos archivos publicados. Con varios `styleUrls` el nombre sale
+   * del primero; solo con `styles` inline, del componente (`card.component.ts` → `card.component-<hash>.css`).
    */
-  private styleName(sourcePath: string, content: Buffer, scope: string): string {
-    const name = path.basename(sourcePath);
+  private styleName(fileReader: FileReader, content: Buffer, scope: string): string {
+    const name = path.basename(fileReader.stylePath ?? fileReader.templatePath);
     const extension = path.extname(name);
     const source = this.hashed ? content : scope;
     const hash = createHash("sha256").update(source).digest("hex").slice(0, 8);
-    return `${name.slice(0, name.length - extension.length)}-${hash}${extension}`;
+    return `${name.slice(0, name.length - extension.length)}-${hash}.css`;
   }
 }

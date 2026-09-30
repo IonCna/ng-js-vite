@@ -128,6 +128,50 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         expect(files.ownersOf(path.join(dir, "alert.css"))).toEqual([path.join(dir, "alert.ts")])
     })
 
+    test("styleUrls (Angular 16) y styles inline: una sola hoja escopeada — primero styles, después cada styleUrls — y se sacan del código", async () => {
+        writeFileSync(path.join(dir, "card.html"), "<div class='card'><i class='icon'></i></div>")
+        writeFileSync(path.join(dir, "card.css"), ".card { color: red; }")
+        writeFileSync(path.join(dir, "icons.css"), ".icon { width: 1px; }")
+        const files = TemplateFiles.create()
+        const code = [
+            "@Component({",
+            "    selector: \"app-card\",",
+            "    templateUrl: \"./card.html\",",
+            "    styleUrls: [\"./card.css\", './icons.css'],",
+            "    styles: [`:host { display: block; }`, \"a[href] { color: blue; }\",],",
+            "})",
+            "class Card {}",
+        ].join("\n")
+
+        const result = (await files.transform(code, path.join(dir, "card.ts")))!.code
+        expect(result).not.toContain("styleUrls")
+        expect(result).not.toContain("styles:")
+        expect(result).toContain("selector: \"app-card\"")
+        const href = result.match(/var h = "([^"]+)"/)?.[1]
+        expect(href).toMatch(/^styles\/card-[0-9a-f]{8}\.css$/)
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        const css = readFileSync(path.join(out, href!), "utf8")
+        expect(css).toMatch(/^app-card\{display:block\}a\[href\]\[_content-[0-9a-f]{8}\]\{color:blue\}\.card\[_content-[0-9a-f]{8}\]\{color:red\}\.icon\[_content-[0-9a-f]{8}\]\{width:1px\}$/)
+        expect(files.ownersOf(path.join(dir, "icons.css"))).toEqual([path.join(dir, "card.ts")])
+    })
+
+    test("template inline + solo styles inline: el CSS sale en styles/ con el nombre del componente", async () => {
+        const files = TemplateFiles.create()
+        const code = "@Component({ selector: \"app-x\", template: '<p>hola</p>', styles: `p { margin: 0; }` }) class X {}"
+
+        const result = (await files.transform(code, path.join(dir, "x.component.ts")))!.code
+        expect(result).toMatch(/template: "<p _content-[0-9a-f]{8}=\\"\\">hola<\/p>"/)
+        expect(result).not.toContain("styles:")
+        const href = result.match(/var h = "([^"]+)"/)?.[1]
+        expect(href).toMatch(/^styles\/x\.component-[0-9a-f]{8}\.css$/)
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        expect(readFileSync(path.join(out, href!), "utf8")).toMatch(/^p\[_content-[0-9a-f]{8}\]\{margin:0\}$/)
+    })
+
     test("reescribe templateUrl a la URL pública con hash y emite el template escopeado en templates/", async () => {
         writeFileSync(path.join(dir, "card.html"), "<div class='card'></div>")
         writeFileSync(path.join(dir, "card.css"), ".card { color: red; }")

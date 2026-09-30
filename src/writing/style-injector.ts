@@ -27,7 +27,8 @@ export class StyleInjector {
     );
   }
 
+  /** Saca `styleUrl`/`styleUrls`/`styles` del código: el CSS ya viaja escopeado por otro lado. */
   private static withoutStyleUrl(code: MappedCode): MappedCode {
-    return code.replace(new RegExp(`${CodeReader.styleRegExp.source},?`), "");
+    return code.removeRanges((source) => CodeReader.styleDeclarations(CodeReader.withoutComments(source)));
   }
 }

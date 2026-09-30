@@ -42,6 +42,12 @@ export class MappedCode {
         return this
     }
 
+    /** Saca los rangos `[start, end)` que `find` encuentra en el código ORIGINAL. */
+    removeRanges(find: (code: string) => { start: number, end: number }[]): this {
+        for (const { start, end } of find(this.code)) this.text.remove(start, end)
+        return this
+    }
+
     prepend(text: string): this {
         this.text.prepend(text)
         return this
