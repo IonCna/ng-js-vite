@@ -7,10 +7,9 @@ export type CodeHashResult = {
 
 export class CodeReader {
     static templateRegExp = /templateUrl\s*:\s*(['"])(.*?)\1/
-    static styleRegExp = /styleUrl\s*:\s*(['"])(.*?)\1/
     /**
      * `template` inline como literal (comillas o backticks sin `${...}`). Solo cuenta si el componente además tiene
-     * `styleUrl`: el CSS se escopea con un atributo que el template también tiene que llevar.
+     * estilos: el CSS se escopea con un atributo que el template también tiene que llevar.
      */
     static inlineTemplateRegExp = /\btemplate\s*:\s*(`(?:[^`\\$]|\\[\s\S]|\$(?!\{))*`|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")/
     /** El `selector` del decorador: es el host del componente (`:host` del CSS se traduce a él). */
@@ -18,11 +17,23 @@ export class CodeReader {
 
     private constructor(
         public readonly templateUrl: string | undefined,
-        public readonly styleUrl?: string,
+        /** `styleUrls: [...]` (Angular 16) y/o `styleUrl: "..."`, en orden. */
+        public readonly styleUrls: string[] = [],
         public readonly selector?: string,
-        /** El valor del `template` inline (sin `templateUrl`, con `styleUrl`). */
+        /** El valor del `template` inline (sin `templateUrl`, con estilos). */
         public readonly inlineTemplate?: string,
+        /** `styles: [...]` / `styles: "..."`: CSS inline del componente, en orden. */
+        public readonly styles: string[] = [],
     ) {}
+
+    /** El primer `styleUrl`/`styleUrls` (o `undefined`). */
+    public get styleUrl(): string | undefined {
+        return this.styleUrls[0]
+    }
+
+    public get hasStyles(): boolean {
+        return this.styleUrls.length > 0 || this.styles.length > 0
+    }
 
     private _hash!: string
     private _hashedName!: string
@@ -124,24 +135,86 @@ export class CodeReader {
 
     static from(source: string): CodeReader {
         const content = CodeReader.withoutComments(source)
-        const styleUrl = CodeReader._getStyle(content)
+        const declarations = CodeReader.styleDeclarations(content)
+        const styleUrls = declarations.flatMap(declaration => declaration.urls)
+        const styles = declarations.flatMap(declaration => declaration.styles)
         const selector = content.match(CodeReader.selectorRegExp)?.[2]
 
-        const inlineTemplate = !CodeReader.templateRegExp.test(content) && styleUrl !== undefined
+        const inlineTemplate = !CodeReader.templateRegExp.test(content) && declarations.length > 0
             ? CodeReader._getInlineTemplate(content)
             : undefined
-        if (inlineTemplate !== undefined) return new CodeReader(undefined, styleUrl, selector, inlineTemplate)
+        if (inlineTemplate !== undefined) return new CodeReader(undefined, styleUrls, selector, inlineTemplate, styles)
 
-        return new CodeReader(CodeReader._getTemplate(content), styleUrl, selector)
+        return new CodeReader(CodeReader._getTemplate(content), styleUrls, selector, undefined, styles)
     }
 
-    /** Componente con `template` inline + `styleUrl` (sin `templateUrl`). */
+    /** Componente con `template` inline + estilos (`styleUrl`/`styleUrls`/`styles`), sin `templateUrl`. */
     static hasInlineTemplateWithStyle(source: string): boolean {
-        if (!source.includes("styleUrl")) return false
+        if (!/\bstyle(Url|Urls|s)\b/.test(source)) return false
         const content = CodeReader.withoutComments(source)
         return !CodeReader.templateRegExp.test(content)
-            && CodeReader.styleRegExp.test(content)
+            && CodeReader.styleDeclarations(content).length > 0
             && CodeReader.inlineTemplateRegExp.test(content)
+    }
+
+    /**
+     * Cada `styleUrl: "..."`, `styleUrls: ["...", ...]` y `styles: "..."`/`styles: [\`...\`, ...]` del código (sin
+     * comentarios, ver `withoutComments`), con su rango — `end` incluye la coma que lo sigue, para sacarlo entero.
+     * Solo literales (comillas o backticks sin `${...}`): un valor que no se puede leer en build no es una declaración.
+     */
+    static styleDeclarations(content: string): { start: number, end: number, urls: string[], styles: string[] }[] {
+        const declarations: { start: number, end: number, urls: string[], styles: string[] }[] = []
+        for (const match of content.matchAll(/\b(styleUrls|styleUrl|styles)\s*:\s*/g)) {
+            const key = match[1]!
+            const at = match.index! + match[0].length
+            const list = content[at] === "["
+            if (key === "styleUrl" && list) continue
+            if (key === "styleUrls" && !list) continue
+            const parsed = list ? CodeReader._literalList(content, at) : CodeReader._literal(content, at)
+            if (!parsed) continue
+            const values = Array.isArray(parsed.value) ? parsed.value : [parsed.value]
+            const comma = /^\s*,/.exec(content.slice(parsed.end))
+            declarations.push({
+                start: match.index!,
+                end: parsed.end + (comma ? comma[0].length : 0),
+                urls: key === "styles" ? [] : values,
+                styles: key === "styles" ? values : [],
+            })
+        }
+        return declarations
+    }
+
+    /** Un literal de string en `at` (`'...'`, `"..."` o backticks sin `${...}`), ya evaluado. */
+    private static _literal(content: string, at: number): { value: string, end: number, quote: string } | undefined {
+        const quote = content[at]
+        if (quote !== "'" && quote !== '"' && quote !== "`") return
+        let i = at + 1
+        while (i < content.length && content[i] !== quote) {
+            if (content[i] === "\\") i += 2
+            else if (quote !== "`" && content[i] === "\n") return
+            else if (quote === "`" && content[i] === "$" && content[i + 1] === "{") return
+            else i++
+        }
+        if (i >= content.length) return
+        return { value: new Function(`return ${content.slice(at, i + 1)}`)() as string, end: i + 1, quote }
+    }
+
+    /** `[literal, literal, ...]` en `at` (coma final permitida). */
+    private static _literalList(content: string, at: number): { value: string[], end: number } | undefined {
+        const values: string[] = []
+        let i = at + 1
+        const skip = () => { while (/\s/.test(content[i] ?? "")) i++ }
+        skip()
+        while (content[i] !== "]") {
+            const literal = CodeReader._literal(content, i)
+            if (!literal) return
+            values.push(literal.value)
+            i = literal.end
+            skip()
+            if (content[i] === ",") { i++; skip() }
+            else if (content[i] !== "]") return
+        }
+        return { value: values, end: i + 1 }
     }
 
     private static _getInlineTemplate(content: string): string | undefined {
@@ -149,18 +222,6 @@ export class CodeReader {
         if (literal === undefined) return
         // Un literal sin `${...}`: evaluarlo da su valor ya "cocinado" (escapes, `\n`, etc.).
         return new Function(`return ${literal}`)() as string
-    }
-
-    private static _getStyle(content: string): string | undefined {
-        if (!content.includes("styleUrl")) return
-
-        const match = content.match(CodeReader.styleRegExp)
-        if (!match) return
-
-        const [,,styleUrl] = match
-        if (styleUrl === undefined) return
-
-        return styleUrl
     }
 
     private static _getTemplate(content: string): string {

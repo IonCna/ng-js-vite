@@ -23,6 +23,17 @@ describe("CodeReader", () => {
         expect(CodeReader.hasInlineTemplateWithStyle("{ styleUrl: './a.css', template: `<p>${x}</p>` }")).toBeFalse()
     })
 
+    test("reads styleUrls and styles (string or array of literals), in order; a non-literal value is not a declaration", () => {
+        const reader = CodeReader.from("{ templateUrl: './v.html', styleUrls: ['./a.css', \"./b.css\"], styles: [`a[x] { }`, 'b { }'] }")
+        expect(reader.styleUrls).toEqual(["./a.css", "./b.css"])
+        expect(reader.styleUrl).toBe("./a.css")
+        expect(reader.styles).toEqual(["a[x] { }", "b { }"])
+        expect(CodeReader.from("{ templateUrl: './v.html', styles: `p {}` }").styles).toEqual(["p {}"])
+        expect(CodeReader.from("{ templateUrl: './v.html', styles: css, styleUrls: urls }").hasStyles).toBeFalse()
+        expect(CodeReader.from("{ templateUrl: './v.html', styles: [`${x}`] }").hasStyles).toBeFalse()
+        expect(CodeReader.hasInlineTemplateWithStyle("{ template: `<p></p>`, styles: ['p {}'] }")).toBeTrue()
+    })
+
     test("ignores templateUrl/styleUrl quoted inside comments", () => {
         const code = [
             "/** upstream: `styleUrl: './day.scss'` */",

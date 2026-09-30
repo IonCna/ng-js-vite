@@ -63,11 +63,28 @@ export default defineConfig({
 })
 ```
 
+## Component styles
+
+All the Angular 16 forms are read (as literals) and merged into one scoped stylesheet per component — `styles` first,
+then each `styleUrls` entry, in order, like Angular:
+
+```ts
+@Component({
+  selector: "app-card",
+  templateUrl: "./card.component.html",
+  styleUrls: ["./card.component.css", "./shared.css"],
+  styles: [`:host { display: block; }`],
+})
+```
+
+`styleUrl: "./x.css"` (the single-file form from Angular 17) is still accepted. A value that isn't a literal (a variable,
+a template literal with `${...}`) is not read.
+
 ## File Scope
 
 For now, this plugin supports **one `templateUrl` per source file**.
 
-If a `styleUrl` exists in that same file, it is paired with that template, scoped to it, and added to Vite's CSS bundle.
+If `styleUrls`/`styleUrl`/`styles` exist in that same file, they are paired with that template, scoped to it, and added to Vite's CSS bundle.
 
 Recommended component shape:
 

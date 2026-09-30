@@ -20,17 +20,30 @@ export class FileReader {
     private constructor(
         /** El `.html` del `templateUrl`; con template inline, el propio componente (de ahí sale el scope). */
         public readonly templatePath: string,
-        public readonly stylePath?: string,
+        /** Los `.css` de `styleUrls`/`styleUrl`, en orden. */
+        public readonly stylePaths: string[] = [],
         /** El `selector` del componente — a qué se traduce `:host` en su CSS (`TemplatePatcher`). */
         public readonly hostSelector?: string,
         /** El `template` inline del componente (sin `templateUrl`): no se lee de disco. */
         public readonly inlineTemplate?: Buffer,
+        /** `styles` del componente (CSS inline), en orden. */
+        public readonly inlineStyles: string[] = [],
     ) {}
 
     public get inline(): boolean {
         return this.inlineTemplate !== undefined
     }
 
+    /** El primer `.css` (o `undefined`): de él toma el nombre la hoja publicada. */
+    public get stylePath(): string | undefined {
+        return this.stylePaths[0]
+    }
+
+    public get hasStyles(): boolean {
+        return this.stylePaths.length > 0 || this.inlineStyles.length > 0
+    }
+
+    /** Como Angular: primero `styles`, después cada `styleUrls`, en una sola hoja. */
     public async read(options: FileReaderReadOptions = { }) {
         if(this._template && !options.preventCache) return {
             template: this._template,
@@ -39,18 +52,18 @@ export class FileReader {
 
         const readTemplate = () => this.inlineTemplate ?? readFile(this.templatePath)
 
-        if(!this.stylePath) {
+        if(!this.hasStyles) {
             this._template = await readTemplate()
             return { template: this._template }
         }
 
-        const [template, style] = await Promise.all([
+        const [template, files] = await Promise.all([
             readTemplate(),
-            readFile(this.stylePath),
+            Promise.all(this.stylePaths.map(stylePath => readFile(stylePath, "utf-8"))),
         ])
 
         this._template = template
-        this._style = style
+        this._style = Buffer.from([...this.inlineStyles, ...files].join("\n"), "utf-8")
 
         return {
             template: this._template,
@@ -64,20 +77,14 @@ export class FileReader {
     }
 
     static parse(reader: CodeReader, id: string) {
+        const styleLocations = reader.styleUrls.map(styleUrl => FileReader._resolve(styleUrl, id))
         if(reader.inlineTemplate !== undefined) {
             const [componentPath = id] = id.split("?")
-            const styleLocation = reader.styleUrl ? FileReader._resolve(reader.styleUrl, id) : undefined
-            return new FileReader(path.resolve(componentPath), styleLocation, reader.selector, Buffer.from(reader.inlineTemplate, "utf-8"))
+            return new FileReader(path.resolve(componentPath), styleLocations, reader.selector, Buffer.from(reader.inlineTemplate, "utf-8"), reader.styles)
         }
 
         const templateLocation = FileReader._resolve(reader.templateUrl!, id)
-
-        if(reader.styleUrl) {
-            const styleLocation = FileReader._resolve(reader.styleUrl, id)
-            return new FileReader(templateLocation, styleLocation, reader.selector)
-        }
-
-        return new FileReader(templateLocation, undefined, reader.selector)
+        return new FileReader(templateLocation, styleLocations, reader.selector, undefined, reader.styles)
     }
 
     static validate(id: string, content: string) {
@@ -94,7 +101,7 @@ export class FileReader {
         const isCandidate = candidates.test(cleanId)
 
         if(!isCandidate) return false
-        if (!content.includes("templateUrl") && !content.includes("styleUrl")) return false
+        if (!content.includes("templateUrl") && !/\bstyle(Url|Urls|s)\b/.test(content)) return false
         return CodeReader.templateRegExp.test(CodeReader.withoutComments(content)) || CodeReader.hasInlineTemplateWithStyle(content)
     }
 
