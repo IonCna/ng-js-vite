@@ -97,6 +97,12 @@ describe("templateTransform (esbuild)", () => {
     })
 })
 
+/** El CSS que el módulo transformado agrega a `document.head` en un `<style>` (o `undefined` si no agrega). */
+function injectedCss(code: string | undefined): string | undefined {
+    const literal = code?.match(/s\.textContent = ("(?:[^"\\]|\\.)*")/)?.[1]
+    return literal === undefined ? undefined : JSON.parse(literal)
+}
+
 describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
     let dir: string
 
@@ -110,7 +116,7 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
 
     const card = `@Component({ selector: "app-card", templateUrl: "./card.html", styleUrl: "./card.css" }) class Card {}`
 
-    test("template inline + styleUrl: el template queda en el código, el CSS sale en styles/ con su <link>", async () => {
+    test("template inline + styleUrl: el template queda en el código y el CSS va en un <style> del módulo", async () => {
         writeFileSync(path.join(dir, "alert.css"), ":host { display: block; }")
         const files = TemplateFiles.create()
         const code = "@Component({ selector: \"ngb-alert\", styleUrl: \"./alert.css\", template: '<p>hola</p>' }) class Alert {}"
@@ -118,13 +124,11 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         const result = (await files.transform(code, path.join(dir, "alert.ts")))?.code
         expect(result).not.toContain("templateUrl")
         expect(result).toMatch(/template: "<p _content-[0-9a-f]{8}=\\"\\">hola<\/p>"/)
-        const href = result?.match(/var h = "([^"]+)"/)?.[1]
-        expect(href).toMatch(/^styles\/alert-[0-9a-f]{8}\.css$/)
+        expect(injectedCss(result)).toBe("ngb-alert{display:block}")
 
         const out = path.join(dir, "dist")
         await files.emit(out)
-        expect(readdirSync(out)).toEqual(["styles"])
-        expect(readFileSync(path.join(out, href!), "utf8")).toBe("ngb-alert{display:block}")
+        expect(existsSync(out)).toBe(false) // nada que publicar: ni template ni CSS aparte
         expect(files.ownersOf(path.join(dir, "alert.css"))).toEqual([path.join(dir, "alert.ts")])
     })
 
@@ -147,29 +151,19 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         expect(result).not.toContain("styleUrls")
         expect(result).not.toContain("styles:")
         expect(result).toContain("selector: \"app-card\"")
-        const href = result.match(/var h = "([^"]+)"/)?.[1]
-        expect(href).toMatch(/^styles\/card-[0-9a-f]{8}\.css$/)
-
-        const out = path.join(dir, "dist")
-        await files.emit(out)
-        const css = readFileSync(path.join(out, href!), "utf8")
+        const css = injectedCss(result)
         expect(css).toMatch(/^app-card\{display:block\}a\[href\]\[_content-[0-9a-f]{8}\]\{color:blue\}\.card\[_content-[0-9a-f]{8}\]\{color:red\}\.icon\[_content-[0-9a-f]{8}\]\{width:1px\}$/)
         expect(files.ownersOf(path.join(dir, "icons.css"))).toEqual([path.join(dir, "card.ts")])
     })
 
-    test("template inline + solo styles inline: el CSS sale en styles/ con el nombre del componente", async () => {
+    test("template inline + solo styles inline: el CSS va escopeado en el <style> del módulo", async () => {
         const files = TemplateFiles.create()
         const code = "@Component({ selector: \"app-x\", template: '<p>hola</p>', styles: `p { margin: 0; }` }) class X {}"
 
         const result = (await files.transform(code, path.join(dir, "x.component.ts")))!.code
         expect(result).toMatch(/template: "<p _content-[0-9a-f]{8}=\\"\\">hola<\/p>"/)
         expect(result).not.toContain("styles:")
-        const href = result.match(/var h = "([^"]+)"/)?.[1]
-        expect(href).toMatch(/^styles\/x\.component-[0-9a-f]{8}\.css$/)
-
-        const out = path.join(dir, "dist")
-        await files.emit(out)
-        expect(readFileSync(path.join(out, href!), "utf8")).toMatch(/^p\[_content-[0-9a-f]{8}\]\{margin:0\}$/)
+        expect(injectedCss(result)).toMatch(/^p\[_content-[0-9a-f]{8}\]\{margin:0\}$/)
     })
 
     test("reescribe templateUrl a la URL pública con hash y emite el template escopeado en templates/", async () => {
@@ -188,24 +182,20 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         expect(readFileSync(path.join(out, "templates", emitted!), "utf8")).toMatch(/class="card" _content-[0-9a-f]{8}=""/)
     })
 
-    test("el CSS sale aparte en styles/ (escopeado, con hash) y el módulo agrega su <link> una sola vez", async () => {
+    test("el CSS va en el JS (escopeado) y el módulo lo agrega en un <style>, como Angular: sin archivo ni <link> aparte", async () => {
         writeFileSync(path.join(dir, "card.html"), "<div class='card'></div>")
         writeFileSync(path.join(dir, "card.css"), ".card { color: red; }")
         const files = TemplateFiles.create()
 
         const result = (await files.transform(card, path.join(dir, "card.ts")))!.code
-        const href = result.match(/var h = "([^"]+)"/)?.[1]
-        expect(href).toMatch(/^styles\/card-[0-9a-f]{8}\.css$/)
         expect(result).not.toContain("styleUrl")
-        expect(result).not.toContain("textContent") // nada de <style> inline
-        expect(result).toContain('l.rel = "stylesheet"')
-        expect(result).toContain("data-ngjs-style")
+        expect(result).not.toContain('rel = "stylesheet"') // nada de <link>: un pedido aparte deja la vista sin estilos
+        expect(result).toContain("document.head.appendChild(s)")
+        expect(injectedCss(result)).toMatch(/^\.card\[_content-[0-9a-f]{8}\]\{color:red\}$/)
 
         const out = path.join(dir, "dist")
         await files.emit(out)
-        const [emitted] = readdirSync(path.join(out, "styles"))
-        expect(`styles/${emitted}`).toBe(href!)
-        expect(readFileSync(path.join(out, "styles", emitted!), "utf8")).toMatch(/\.card\[_content-[0-9a-f]{8}\]/)
+        expect(readdirSync(out)).toEqual(["templates"])
     })
 
     test("un template con <ng-content> agrega ɵngContent (el compilador no ve el template para decidir transclude)", async () => {
@@ -228,28 +218,26 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         expect(files.ownersOf(path.join(dir, "otro.html"))).toEqual([])
     })
 
-    test("sin styleUrl no hay link ni carpeta styles/", async () => {
+    test("sin estilos el módulo no agrega ningún <style>", async () => {
         writeFileSync(path.join(dir, "card.html"), "<div></div>")
         const files = TemplateFiles.create()
         const result = (await files.transform(`@Component({ selector: "app-card", templateUrl: "./card.html" }) class Card {}`, path.join(dir, "card.ts")))?.code
-        expect(result).not.toContain("data-ngjs-style")
+        expect(injectedCss(result)).toBeUndefined()
 
         const out = path.join(dir, "dist")
         await files.emit(out)
         expect(readdirSync(out)).toEqual(["templates"])
     })
 
-    test("hashed: false usa el nombre fijo y el middleware sirve template y CSS releídos del disco", async () => {
+    test("hashed: false usa el nombre fijo y el middleware sirve el template releído del disco", async () => {
         writeFileSync(path.join(dir, "card.html"), "<p>v1</p>")
         writeFileSync(path.join(dir, "card.css"), "p { color: red; }")
         const files = TemplateFiles.create({ hashed: false })
         const result = (await files.transform(card, path.join(dir, "card.ts")))!.code
         expect(result).toContain(`templateUrl: "templates/card.html"`)
-        const href = result.match(/var h = "([^"]+)"/)![1]!
-        expect(href).toMatch(/^styles\/card-[0-9a-f]{8}\.css$/)
+        expect(injectedCss(result)).toContain("red")
 
         writeFileSync(path.join(dir, "card.html"), "<p>v2</p>")
-        writeFileSync(path.join(dir, "card.css"), "p { color: blue; }")
         const request = (url: string) => new Promise<{ body: string; type: string }>((resolve, reject) => {
             let type = ""
             files.middleware()({ url }, { statusCode: 0, setHeader: (_: string, value: string) => { type = value }, end: (body: Buffer) => resolve({ body: body.toString(), type }) }, reject)
@@ -257,16 +245,12 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         expect((await request("/templates/card.html?x=1")).body).toContain("v2")
         // URL relativa: la página la pide con su <base href> adelante (GitHub Pages en un subpath).
         expect((await request("/ngb-js-docs/templates/card.html")).body).toContain("v2")
-        const css = await request(href)
-        expect(css.type).toContain("text/css")
-        expect(css.body).toContain("blue")
-
         let passed = false
         files.middleware()({ url: "/otra/cosa.html" }, { statusCode: 0, setHeader() {}, end() {} }, () => { passed = true })
         expect(passed).toBe(true)
     })
 
-    test("un mismo .css compartido por dos componentes se publica una vez por scope (no se pisan)", async () => {
+    test("un mismo .css compartido por dos componentes se escopea distinto para cada uno", async () => {
         writeFileSync(path.join(dir, "shared.css"), "p { color: red; }")
         for (const sub of ["a", "b"]) {
             mkdirSync(path.join(dir, sub))
@@ -275,8 +259,9 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         const shared = (sub: string) => `@Component({ selector: "app-${sub}", templateUrl: "./${sub}.html", styleUrl: "../shared.css" }) class C {}`
         for (const hashed of [true, false]) {
             const files = TemplateFiles.create({ hashed })
-            const a = (await files.transform(shared("a"), path.join(dir, "a", "a.ts")))!.code.match(/var h = "([^"]+)"/)![1]
-            const b = (await files.transform(shared("b"), path.join(dir, "b", "b.ts")))!.code.match(/var h = "([^"]+)"/)![1]
+            const a = injectedCss((await files.transform(shared("a"), path.join(dir, "a", "a.ts")))!.code)
+            const b = injectedCss((await files.transform(shared("b"), path.join(dir, "b", "b.ts")))!.code)
+            expect(a).toMatch(/^p\[_content-[0-9a-f]{8}\]\{color:red\}$/)
             expect(a).not.toBe(b)
         }
     })
@@ -335,3 +320,89 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
     })
 })
 
+
+describe("TemplateFiles: url() del CSS de un componente", () => {
+    let dir: string
+
+    beforeEach(() => {
+        dir = mkdtempSync(path.join(tmpdir(), "ng-js-vite-style-assets-test-"))
+        mkdirSync(path.join(dir, "app", "card"), { recursive: true })
+        mkdirSync(path.join(dir, "assets"), { recursive: true })
+        writeFileSync(path.join(dir, "assets", "logo.png"), "PNG")
+        writeFileSync(path.join(dir, "app", "card", "card.html"), "<i class=\"logo\"></i>")
+    })
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true })
+    })
+
+    const card = "@Component({ selector: \"app-card\", templateUrl: \"./card.html\", styleUrls: [\"./card.css\"] }) class Card {}"
+    const component = () => path.join(dir, "app", "card", "card.ts")
+
+    test("un url() relativo se resuelve contra el .css, el archivo sale en media/ con hash y el CSS apunta ahí (con el base del build)", async () => {
+        writeFileSync(path.join(dir, "app", "card", "card.css"), ".logo { mask: url(\"../../assets/logo.png\") center / contain no-repeat; }")
+        const files = TemplateFiles.create({ base: "/Client/dist/" })
+
+        const css = injectedCss((await files.transform(card, component()))!.code)
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        const [media] = readdirSync(path.join(out, "media"))
+        expect(media).toMatch(/^logo-[0-9a-f]{8}\.png$/)
+        expect(readFileSync(path.join(out, "media", media!), "utf8")).toBe("PNG")
+        // El CSS va en un <style> del documento: la URL es la de lo publicado, no relativa a una hoja.
+        expect(css).toContain(`url(/Client/dist/media/${media})`)
+    })
+
+    test("quedan tal cual: absolutas al sitio, con esquema, data: y fragmentos; ?query y #fragment se conservan", async () => {
+        writeFileSync(
+            path.join(dir, "app", "card", "card.css"),
+            [
+                ".a { background: url(/img/x.png); }",
+                ".b { background: url(https://cdn.test/x.png); }",
+                ".c { background: url(data:image/png;base64,AAAA); }",
+                ".d { filter: url(#blur); }",
+                ".e { background: url(../../assets/logo.png?v=2#frag); }",
+            ].join("\n"),
+        )
+        const files = TemplateFiles.create()
+        const css = injectedCss((await files.transform(card, component()))!.code)
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        const media = readdirSync(path.join(out, "media"))
+        expect(media).toHaveLength(1)
+        expect(css).toContain("url(/img/x.png)")
+        expect(css).toContain("url(https://cdn.test/x.png)")
+        expect(css).toContain("url(data:image/png;base64,AAAA)")
+        expect(css).toContain("url(#blur)")
+        expect(css).toContain(`url(media/${media[0]}?v=2#frag)`) // sin base: relativa al <base href>
+    })
+
+    test("un url() a un archivo que no existe falla nombrando el .css y el archivo", async () => {
+        writeFileSync(path.join(dir, "app", "card", "card.css"), ".logo { background: url(./nope.png); }")
+        const files = TemplateFiles.create()
+        await expect(files.transform(card, component())).rejects.toThrow(/card\.css.*nope\.png.*no existe/s)
+    })
+
+    test("sin hash (dev-server): nombre estable por ruta y el middleware sirve media/", async () => {
+        writeFileSync(path.join(dir, "app", "card", "card.css"), ".logo { background: url(../../assets/logo.png); }")
+        const files = TemplateFiles.create({ hashed: false })
+        await files.transform(card, component())
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        const [media] = readdirSync(path.join(out, "media"))
+
+        const served = await new Promise<{ type: string; body: string }>((resolve, reject) => {
+            const res = {
+                statusCode: 0,
+                type: "",
+                setHeader(_name: string, value: string) { this.type = value },
+                end(body: Buffer) { resolve({ type: this.type, body: body.toString("utf8") }) },
+            }
+            files.middleware()({ url: `/media/${media}` }, res, () => reject(new Error("no lo sirvió")))
+        })
+        expect(served).toEqual({ type: "image/png", body: "PNG" })
+    })
+})

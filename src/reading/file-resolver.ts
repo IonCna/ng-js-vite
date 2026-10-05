@@ -4,6 +4,8 @@ import {readFile} from "node:fs/promises";
 
 export type FileReaderReadOptions = {
     preventCache?: boolean
+    /** Pasa por cada hoja antes de unirlas: `from` es el `.css` (con `styles` inline, el template o el componente). */
+    styleTransform?: (css: string, from: string) => string
 }
 
 export class FileReader {
@@ -63,7 +65,14 @@ export class FileReader {
         ])
 
         this._template = template
-        this._style = Buffer.from([...this.inlineStyles, ...files].join("\n"), "utf-8")
+        const transform = options.styleTransform
+        const sheets = transform
+            ? [
+                ...this.inlineStyles.map(css => transform(css, this.templatePath)),
+                ...files.map((css, index) => transform(css, this.stylePaths[index]!)),
+            ]
+            : [...this.inlineStyles, ...files]
+        this._style = Buffer.from(sheets.join("\n"), "utf-8")
 
         return {
             template: this._template,
