@@ -182,6 +182,24 @@ describe("TemplateFiles (esbuild, templates en archivos aparte)", () => {
         expect(readFileSync(path.join(out, "templates", emitted!), "utf8")).toMatch(/class="card" _content-[0-9a-f]{8}=""/)
     })
 
+    test("inline: el templateUrl pasa a template escopeado en el código y no se publica nada en templates/", async () => {
+        writeFileSync(path.join(dir, "card.html"), "<div class='card'><ng-content></ng-content></div>")
+        writeFileSync(path.join(dir, "card.css"), ".card { color: red; }")
+        const files = TemplateFiles.create({ inline: true })
+
+        const result = (await files.transform(card, path.join(dir, "card.ts")))!.code
+        expect(result).not.toContain("templateUrl")
+        expect(result).not.toContain("ɵngContent") // el compilador ve el template: decide `transclude` solo
+        expect(result).toMatch(/template: "<div class=\\"card\\" _content-[0-9a-f]{8}=\\"\\"><ng-content/)
+        expect(injectedCss(result)).toMatch(/^\.card\[_content-[0-9a-f]{8}\]\{color:red\}$/)
+
+        const out = path.join(dir, "dist")
+        await files.emit(out)
+        expect(existsSync(out)).toBe(false)
+        // El `.html` sigue teniendo dueño: editarlo recompila el componente en el dev-server.
+        expect(files.ownersOf(path.join(dir, "card.html"))).toEqual([path.join(dir, "card.ts")])
+    })
+
     test("el CSS va en el JS (escopeado) y el módulo lo agrega en un <style>, como Angular: sin archivo ni <link> aparte", async () => {
         writeFileSync(path.join(dir, "card.html"), "<div class='card'></div>")
         writeFileSync(path.join(dir, "card.css"), ".card { color: red; }")

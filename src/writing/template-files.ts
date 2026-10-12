@@ -23,6 +23,11 @@ export type TemplateFilesOptions = {
    * (GitHub Pages). Un prefijo absoluto (`/app/`) las fija.
    */
   base?: string;
+  /**
+   * `true`: un `templateUrl` pasa a `template` (escopeado) dentro del código, como Angular — el HTML viaja con el JS,
+   * sin pedido aparte, y `templates/` no se publica. `false` (default): cada template en su archivo.
+   */
+  inline?: boolean;
 };
 
 /**
@@ -106,6 +111,8 @@ class PublishedTemplates {
  * componente — sin pedido aparte, la vista nunca se pinta sin sus estilos; el de un módulo lazy llega con su chunk.
  * Lo que ese CSS referencia con `url()` sale en `media/` (`StyleAssets`).
  *
+ * Con `inline` el template también viaja en el JS (`templateUrl` → `template`): solo se publica `media/`.
+ *
  * Con estado: una instancia por build/servidor. `emit(outDir)` escribe lo visto (build) y `middleware()` lo sirve
  * (dev-server, releído del disco en cada request).
  */
@@ -118,9 +125,11 @@ export class TemplateFiles {
   private readonly assets: StyleAssets;
   private readonly hashed: boolean;
   private readonly base: string;
+  private readonly inline: boolean;
 
   private constructor(options: TemplateFilesOptions) {
     this.hashed = options.hashed ?? true;
+    this.inline = options.inline ?? false;
     const base = options.base ?? "";
     this.base = base === "" || base.endsWith("/") ? base : `${base}/`;
     // El CSS va en un `<style>` del documento: sus `url()` se resuelven como el resto de lo publicado.
@@ -141,8 +150,10 @@ export class TemplateFiles {
     const patched = await TemplatePatcher.from(fileReader, this.readOptions());
     for (const stylePath of fileReader.stylePaths) this.addOwner(stylePath, filePath);
 
-    if (fileReader.inline) {
-      // `template` inline: no se publica (queda en el código, escopeado).
+    if (fileReader.inline || this.inline) {
+      // `template` inline (o un `templateUrl` con `inline`): no se publica (queda en el código, escopeado). El `.html`
+      // de un `templateUrl` sigue teniendo dueño: al editarlo el dev-server recompila el componente.
+      if (!fileReader.inline) this.addOwner(fileReader.templatePath, filePath);
       const rewritten = MappedCode.from(code, filePath).replace(
         reader.templateDeclaration,
         `template: ${JSON.stringify(patched.template.toString("utf-8"))}`,
