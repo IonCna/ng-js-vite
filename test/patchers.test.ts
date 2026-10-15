@@ -60,6 +60,38 @@ describe("TemplatePatcher", () => {
         expect(patched.style).toBeUndefined()
     })
 
+    test("colapsa el espacio del texto y quita comentarios, sin cambiar lo que se pinta", async () => {
+        writeFileSync(path.join(dir, "spaced.html"), [
+            "<!-- explicación para quien lee el template -->",
+            "<section>",
+            "    <button>Uno</button>",
+            "    <button>Dos</button>   <span>  {{ $.name  +  '  x  ' }}  </span>",
+            "    <pre>  a\n    b  </pre>",
+            "    <textarea>  linea\n      sangrada</textarea>",
+            "    <div ngPreserveWhitespaces>    tal   cual    </div>",
+            "    <!-- directive: opi-legacy -->",
+            "    <p title=\"  dos   espacios  \">  hola  </p>",
+            "</section>",
+        ].join("\n"))
+
+        const patched = await patch("./spaced.html")
+        const s = patched.scope
+
+        // El salto de línea que seguía al comentario quitado queda (colapsado), como cualquier otro espacio.
+        expect(patched.template.toString()).toBe([
+            ``,
+            `<section ${s}="">`,
+            `<button ${s}="">Uno</button>`,
+            `<button ${s}="">Dos</button> <span ${s}=""> {{ $.name  +  '  x  ' }} </span>`,
+            `<pre ${s}="">  a\n    b  </pre>`,
+            `<textarea ${s}="">  linea\n      sangrada</textarea>`,
+            `<div ngpreservewhitespaces="" ${s}="">    tal   cual    </div>`,
+            `<!-- directive: opi-legacy -->`,
+            `<p title="  dos   espacios  " ${s}=""> hola </p>`,
+            `</section>`,
+        ].join("\n"))
+    })
+
     test("scopes the template and the style as separate buffers", async () => {
         writeFileSync(path.join(dir, "styled.html"), "<main>styled</main>")
         writeFileSync(path.join(dir, "styled.css"), "main { color: red; }")

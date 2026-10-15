@@ -6,9 +6,16 @@ import { HostSelector } from "@ng-js-vite/writing/host-selector.ts";
 
 type Node = DefaultTreeAdapterMap["childNode"]
 type Element = DefaultTreeAdapterMap["element"]
+type ParentNode = DefaultTreeAdapterMap["parentNode"]
 
 const KEYFRAMES_AT_RULE = /^(-webkit-|-moz-)?keyframes$/i
 const NESTED_SELECTOR_PSEUDO_CLASS = /^(not|is|where|has)$/i
+/** Donde el espacio se ve tal cual: no se colapsa (como `preserveWhitespaces` de Angular). */
+const WHITESPACE_SENSITIVE = new Set(["pre", "textarea", "script", "style"])
+/** Atributo con el que Angular deja intacto el espacio de un elemento (parse5 lo da en minúsculas). */
+const PRESERVE_WHITESPACES = "ngpreservewhitespaces"
+const WHITESPACE_RUN = /[ \t\n\r\f]+/g
+const INTERPOLATION = /(\{\{[\s\S]*?\}\})/
 
 function isElement(node: Node): node is Element {
     return "tagName" in node
@@ -30,8 +37,39 @@ export class TemplatePatcher {
         }
 
         fragment.childNodes.forEach(walk)
+        TemplatePatcher._compact(fragment)
 
         return Buffer.from(serialize(fragment), "utf-8")
+    }
+
+    /**
+     * Como `preserveWhitespaces: false` de Angular, en su versión que no cambia lo que se pinta: cada tramo de espacio
+     * del texto queda en uno solo (un salto de línea si tenía alguno) — el navegador ya lo colapsaba al pintar — y se
+     * quitan los comentarios. Las sangrías del `.html` dejan de viajar en el JS. No se borran los nodos de solo espacio
+     * (Angular sí: dos botones en línea quedarían pegados), ni se toca lo que va entre `{{ }}`, los atributos, `<pre>`,
+     * `<textarea>` ni un elemento con `ngPreserveWhitespaces`. Un comentario `directive:` de AngularJS se queda.
+     */
+    private static _compact(parent: ParentNode): void {
+        parent.childNodes = parent.childNodes.filter(node => {
+            if (node.nodeName === "#comment") return /^\s*directive:/.test((node as DefaultTreeAdapterMap["commentNode"]).data)
+            if (node.nodeName === "#text") {
+                const text = node as DefaultTreeAdapterMap["textNode"]
+                text.value = text.value
+                    .split(INTERPOLATION)
+                    .map((part, index) => index % 2 ? part : part.replace(WHITESPACE_RUN, run => run.includes("\n") ? "\n" : " "))
+                    .join("")
+                return true
+            }
+            if (isElement(node)) {
+                const preserve = WHITESPACE_SENSITIVE.has(node.tagName) || node.attrs.some(attr => attr.name === PRESERVE_WHITESPACES)
+                if (!preserve) {
+                    TemplatePatcher._compact(node)
+                    // `<template>`: parse5 deja sus hijos en `content`.
+                    if ("content" in node) TemplatePatcher._compact((node as DefaultTreeAdapterMap["template"]).content)
+                }
+            }
+            return true
+        })
     }
 
     private static _scopeStyle(style: Buffer, scope: string, host: HostSelector | undefined): Buffer {
